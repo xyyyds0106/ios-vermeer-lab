@@ -50,3 +50,11 @@ patches through 0025 (libpthread, portable crypto, mockfs memory root and the
 no-entitlements AMFI provider). It builds a source-only static PID 1 test
 program, served as `/sbin/launchd` by mockfs. This test uses RAM only and contains
 no Apple userspace firmware, no UFS driver and no iOS interface.
+
+RAM-root attempt 001 is confirmed on hardware by a photograph taken after a
+longer observation: `BSD root: md0`, `init running as PID 1`, and many repeated
+`VERMEER init: still alive` messages. Keep this version as the verified
+checkpoint: commit 2e72c40, Actions run 39428900143. The kernel and init artifact
+manifests are checked before packaging. Wait at least 120-150 seconds when
+testing because RTC/calendar service waits can leave the early log unchanged.
+This proves source-built test userspace runs; it does not prove iOS boots.
