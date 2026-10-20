@@ -31,6 +31,8 @@ for patch in patches:
     counts['timer'] += n
     (target / patch.name).write_text(text)
 assert counts == {'framebuffer': 6, 'width': 2, 'height': 2, 'stride': 4, 'marker': 1, 'timer': 1}, counts
-extra = source.parent / 'vermeer' / '0019-vermeer-early-io-budget.patch'
-shutil.copyfile(extra, target / extra.name)
-print(f'vermeer early profile: {len(patches)} reference patches plus vermeer I/O budget patch; changes: {counts}')
+extras = ('0019-vermeer-early-io-budget.patch', '0020-vermeer-boot-cpu-match.patch')
+for name in extras:
+    extra = source.parent / 'vermeer' / name
+    shutil.copyfile(extra, target / extra.name)
+print(f'vermeer early profile: {len(patches)} reference patches plus {len(extras)} vermeer patches; changes: {counts}')

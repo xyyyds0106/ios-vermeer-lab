@@ -1,0 +1,33 @@
+diff --git a/iokit/KernelConfigTables.cpp b/iokit/KernelConfigTables.cpp
+--- a/iokit/KernelConfigTables.cpp
++++ b/iokit/KernelConfigTables.cpp
+@@ -44,5 +44,5 @@
+     "     'IOClass'         = SweetCPU;"
+     "     'IOProviderClass' = IOPlatformDevice;"
+-    "     'IONameMatch'     = 'qcom,kryo470';"
++    "     'IONameMatch'     = 'arm,cortex-a510';"
+     "     'IOProbeScore'    = 10000:32;"
+     "   },"
+diff --git a/iokit/Kernel/arm/SweetCPU.cpp b/iokit/Kernel/arm/SweetCPU.cpp
+--- a/iokit/Kernel/arm/SweetCPU.cpp
++++ b/iokit/Kernel/arm/SweetCPU.cpp
+@@ -36,3 +36,4 @@
+ SweetCPU::start(IOService *provider)
+ {
++	IOLog("VERMEER CPU: matched Cortex-A510 provider\n");
+ 	const ml_topology_info_t *topology = ml_get_topology_info();
+@@ -46,3 +47,4 @@
+ 	    *(const uint32_t *)reg->getBytesNoCopy() != cpu->phys_id) {
++		IOLog("VERMEER CPU: rejecting CPU node with missing or mismatched topology\n");
+ 		return false;
+ 	}
+@@ -53,3 +53,3 @@
+-	cpuName = OSSymbol::withCStringNoCopy("Kryo 470");
++	cpuName = OSSymbol::withCStringNoCopy("ARM Cortex-A510 (vermeer boot CPU)");
+ 	if (cpuName == NULL) {
+ 		return false;
+@@ -81,3 +83,4 @@
+ 	/* Re-enter the boot CPU through cpu_machine_init -> PE_cpu_machine_init. */
++	IOLog("VERMEER CPU: starting registered boot processor\n");
+ 	result = processor_start(machProcessor);
+ 	if (result != KERN_SUCCESS || getCPUState() != kIOCPUStateRunning) {

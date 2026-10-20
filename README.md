@@ -19,7 +19,7 @@ The workflow is manual-only, has read-only repository permissions and a
 45-minute job limit. It does not contain Apple firmware or device dumps.
 
 The `vermeer-early` profile uses reference patches 0001..0018 plus a targeted
-early I/O page-table budget patch. It adapts the early
+early I/O page-table budget and boot-CPU matching patches. It adapts the early
 console to 0xb8000000 / 1440x3200 / stride 5760, and the virtual timer default
 to INTID 27. It intentionally excludes the later storage and peripheral drivers.
 It still uses the reference machine configuration name SWEET internally. A
@@ -37,3 +37,9 @@ complete`, then panicked in `pmap_map_bd` while mapping the generic video
 console. The profile now budgets early I/O page tables for both framebuffer
 console mappings; the serial ADT maps only the active pixel bytes. No checks
 are bypassed; missing-PTE diagnostics include the failing addresses.
+
+Third attempt passed that panic and printed Darwin, VM, scheduler and security
+initialization logs, stopping after platform-expert registration. The ADT's
+boot CPU is correctly `arm,cortex-a510`, but the reference CPU service matched
+only `qcom,kryo470`. The vermeer profile now matches the actual Cortex-A510 node
+and keeps the reference single-core CPU registration and SGI self-test.
