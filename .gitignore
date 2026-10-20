@@ -1,0 +1,8 @@
+backup/
+device-audit/
+*.img
+*.dtb
+*.jpg
+*.png
+out/
+__pycache__/
