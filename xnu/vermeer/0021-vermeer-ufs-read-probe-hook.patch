@@ -1,0 +1,30 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -103,6 +103,7 @@
+ 
+ bsd/dev/random/randomdev.c		standard
+ 
++bsd/dev/vermeer_ufs_probe.c		standard
+ bsd/dev/memdev.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -766,6 +766,15 @@
+ 		}
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	int vermeer_probe_enabled = 0;
++	if (PE_parse_boot_argn("vermeer_ufs_probe", &vermeer_probe_enabled, sizeof(vermeer_probe_enabled)) && vermeer_probe_enabled == 1) {
++		extern int vermeer_ufs_probe(void);
++		int result = vermeer_ufs_probe();
++		IOLog("VERMEER UFS: self-test returned %d; continuing RAM root\n", result);
++	}
++#endif
++
+ //
+ //	Now check if we are trying to root on a memory device
+ //

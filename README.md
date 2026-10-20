@@ -58,3 +58,20 @@ checkpoint: commit 2e72c40, Actions run 39428900143. The kernel and init artifac
 manifests are checked before packaging. Wait at least 120-150 seconds when
 testing because RTC/calendar service waits can leave the early log unchanged.
 This proves source-built test userspace runs; it does not prove iOS boots.
+
+Standalone K70 probe010 has independently verified UFS reads: activate device
+WLUNd0, query LUN0 capacity, read LBA0..1, and compare all8192bytes with Android.
+Zero byte differences, CRC32=45fbee46, block size4096 and last LBA03afa3ff were
+confirmed in the user photograph. No disk writes or partition erases occurred.
+Probes/photos/device baselines remain private and outside this repository.
+
+The `vermeer-ufs-probe` profile adds an opt-in kernel read self-test to the
+verified RAM-root profile. Boot with `vermeer_ufs_probe=1 rd=md0`. It maps the
+known UFS/SMMU registers, requires the verified firmware route and disabled
+SMMU context, allocates contiguous permanent DMA RAM inside c0000000-d0000000,
+verifies every allocated physical page and explicitly synchronizes caches.
+It uses only TUR, capacity/read and a device-WLUN Active power transition when
+needed, then checks the read CRC against the standalone Android baseline.
+It restores the firmware transfer list when idle and continues mockfs PID1.
+It exposes no storage device and contains no disk write/erase/format command.
+Kernel UFS reads and iOS userspace are not yet verified; hardware testing pending.

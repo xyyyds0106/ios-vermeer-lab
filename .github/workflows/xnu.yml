@@ -9,7 +9,7 @@ on:
       profile:
         description: reference reproduces upstream; vermeer-early has no storage drivers
         type: choice
-        options: [vermeer-early, vermeer-ramroot, reference]
+        options: [vermeer-early, vermeer-ramroot, vermeer-ufs-probe, reference]
         default: vermeer-early
       macos_version:
         description: macOS release whose xnu to build (13.5 = xnu-8796, iOS 16 era)
@@ -59,6 +59,9 @@ jobs:
           elif [ "$PROFILE" = vermeer-ramroot ]; then
             python3 tools/prepare_vermeer.py xnu/patches .ci-patches --ramroot
             cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
+          elif [ "$PROFILE" = vermeer-ufs-probe ]; then
+            python3 tools/prepare_vermeer.py xnu/patches .ci-patches --ufs-probe
+            cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
           elif [ "$PROFILE" = reference ]; then
             cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
           else
@@ -92,7 +95,7 @@ jobs:
         run: bash build.sh
 
       - name: Build minimal RAM-root init
-        if: ${{ success() && env.PROFILE == 'vermeer-ramroot' }}
+        if: ${{ success() && (env.PROFILE == 'vermeer-ramroot' || env.PROFILE == 'vermeer-ufs-probe') }}
         run: |
           mkdir -p out
           xcrun clang -target arm64-apple-ios16.0 -c tools/vermeer-init.S -o vermeer-init.o
