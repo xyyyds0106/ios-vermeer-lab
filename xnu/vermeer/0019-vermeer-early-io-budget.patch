@@ -1,0 +1,26 @@
+diff --git a/osfmk/arm64/arm_vm_init.c b/osfmk/arm64/arm_vm_init.c
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -2310,3 +2310,10 @@
+ 	va_l1_end = va_l1 + ((2 + (mem_segments * 10)) << 20);
+ 	va_l1_end += round_page(args->Video.v_height * args->Video.v_rowBytes);
++#if defined(SWEET)
++	/* vermeer-early maps the framebuffer once for serial kprintf and again
++	 * for the generic video console before VM starts. Budget both mappings
++	 * even with only one 256MB RAM segment. Keep pmap's missing-PTE panic.
++	 */
++	va_l1_end += round_page(args->Video.v_height * args->Video.v_rowBytes);
++#endif
+ 	va_l1_end = (va_l1_end + 0x00000000007FFFFFULL) & 0xFFFFFFFFFF800000ULL;
+diff --git a/osfmk/arm/pmap/pmap.c b/osfmk/arm/pmap/pmap.c
+--- a/osfmk/arm/pmap/pmap.c
++++ b/osfmk/arm/pmap/pmap.c
+@@ -1883,5 +1883,7 @@
+ 		ptep = pmap_pte(kernel_pmap, vaddr);
+ 		if (ptep == PT_ENTRY_NULL) {
+-			panic("pmap_map_bd");
++			panic("pmap_map_bd: no PTE va=%p virt=%p pa=%p end=%p",
++			    (void *)vaddr, (void *)virt,
++			    (void *)start, (void *)end);
+ 		}
+ 		assert(!ARM_PTE_IS_COMPRESSED(*ptep, ptep));

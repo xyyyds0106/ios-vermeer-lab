@@ -6,6 +6,7 @@ does not include the later UFS, USB, touch, battery or iOS GUI drivers.
 """
 from pathlib import Path
 import re
+import shutil
 import sys
 
 source, target = map(Path, sys.argv[1:3])
@@ -30,4 +31,6 @@ for patch in patches:
     counts['timer'] += n
     (target / patch.name).write_text(text)
 assert counts == {'framebuffer': 6, 'width': 2, 'height': 2, 'stride': 4, 'marker': 1, 'timer': 1}, counts
-print(f'vermeer early profile: {len(patches)} patches; changes: {counts}')
+extra = source.parent / 'vermeer' / '0019-vermeer-early-io-budget.patch'
+shutil.copyfile(extra, target / extra.name)
+print(f'vermeer early profile: {len(patches)} reference patches plus vermeer I/O budget patch; changes: {counts}')

@@ -47,7 +47,7 @@ def build():
              [node('gic', [('compatible', string('arm,gic-v3')), ('interrupt-controller', b''),
                            ('virtual-timer-intid', u32(27)),
                            ('reg', u64(0x16100000, 0x10000, 0x16180000, 0x200000))])]),
-        node('sweet-fbcon', [('reg', u64(0xb8000000, 0x02000000)),
+        node('sweet-fbcon', [('reg', u64(0xb8000000, 1440 * 3200 * 4)),
                             ('width', u32(1440)), ('height', u32(3200)), ('stride', u32(5760))]),
     ])
 

@@ -28,3 +28,9 @@ The observed initrd length equals aligned vendor ramdisk + stock init_boot
 ramdisk: ABL did not pass the incoming boot ramdisk to this test image.
 The loader now embeds its XNU payload inside the ARM64 Image and uses linker
 symbols to locate it. The failed attempt did not enter XNU.
+
+Second attempt entered XNU and reached `SWEET EARLY 20: kprintf startup
+complete`, then panicked in `pmap_map_bd` while mapping the generic video
+console. The profile now budgets early I/O page tables for both framebuffer
+console mappings; the serial ADT maps only the active pixel bytes. No checks
+are bypassed; missing-PTE diagnostics include the failing addresses.
