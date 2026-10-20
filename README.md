@@ -74,4 +74,10 @@ It uses only TUR, capacity/read and a device-WLUN Active power transition when
 needed, then checks the read CRC against the standalone Android baseline.
 It restores the firmware transfer list when idle and continues mockfs PID1.
 It exposes no storage device and contains no disk write/erase/format command.
-Kernel UFS reads and iOS userspace are not yet verified; hardware testing pending.
+The kernel self-test is now hardware-verified: build39437189570, commit e884ca2,
+image SHA256 a6fd60dcd9925a2ffed326a3ab2c5a69f9918936faf501b9e7629fb22e22a838.
+The photograph shows allocated DMA PA c2174000, successful Active/TUR/capacity/
+8192-byte read, matching CRC45fbee46, result0, firmware queue restored, then
+md0 root and continuing PID1 heartbeats. This verifies kernel-mode read DMA
+with MMU/cache enabled and preserves the RAM-root test. No filesystem on UFS
+has been mounted, and Apple userspace/iOS remain unverified.
