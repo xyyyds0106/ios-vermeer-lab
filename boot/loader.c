@@ -76,6 +76,7 @@ static int magic_ok(const char *m)
 
 typedef void (*xnu_entry_t)(uint64_t boot_args_pa);
 extern char _head[], _end[];
+extern const char embedded_payload_begin[], embedded_payload_end[];
 
 static int overlaps(uint64_t start, uint64_t end, uint64_t lo, uint64_t hi)
 {
@@ -84,22 +85,13 @@ static int overlaps(uint64_t start, uint64_t end, uint64_t lo, uint64_t hi)
 
 const char *loader_boot(uintptr_t dtb)
 {
-	uint64_t rd_start, rd_end;
-
-	if (!fdt_chosen_u64(dtb, "linux,initrd-start", &rd_start) ||
-	    !fdt_chosen_u64(dtb, "linux,initrd-end", &rd_end))
-		return "no initrd in /chosen";
-	con_hex2("INITRD", "lo=", rd_start, "hi=", rd_end);
+	uint64_t rd_start = (uintptr_t)embedded_payload_begin;
+	uint64_t rd_end = (uintptr_t)embedded_payload_end;
+	con_hex2("PAYLOAD", "lo=", rd_start, "hi=", rd_end);
 	if ((rd_start & 7) || rd_end <= rd_start || rd_end - rd_start > 0x10000000)
-		return "invalid initrd range";
-
-	/* Modern ABL may prepend the vendor ramdisk. Look only at aligned
-	 * addresses, then validate the entire payload before copying anything. */
-	while (rd_end - rd_start >= sizeof(struct payload) &&
-	       !magic_ok((const char *)rd_start))
-		rd_start += 8;
+		return "invalid embedded payload range";
 	if (rd_end - rd_start < sizeof(struct payload))
-		return "no payload in initrd";
+		return "embedded payload too small";
 
 	const struct payload *p = (const struct payload *)rd_start;
 	if (!magic_ok(p->magic))

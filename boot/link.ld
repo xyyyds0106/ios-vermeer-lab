@@ -11,6 +11,8 @@ SECTIONS {
     _bss_end = .;
     . += 0x8000;
     stack_top = .;
+    . = ALIGN(16);
+    .payload : { *(.payload) }
     _end = .;
     /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 }

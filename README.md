@@ -22,3 +22,9 @@ to INTID 27. It intentionally excludes the later storage and peripheral drivers.
 It still uses the reference machine configuration name SWEET internally. A
 successful build is not proof it boots: vermeer ADT, validated RAM allocation
 and a v4 boot shim must be prepared before any device test.
+
+First device attempt stopped in the loader with `no payload in initrd`.
+The observed initrd length equals aligned vendor ramdisk + stock init_boot
+ramdisk: ABL did not pass the incoming boot ramdisk to this test image.
+The loader now embeds its XNU payload inside the ARM64 Image and uses linker
+symbols to locate it. The failed attempt did not enter XNU.
