@@ -104,7 +104,7 @@ the existing guarded, cache-synchronized 8KiB DMA buffer. Any transfer error
 disables further reads; pending DMA is never retried or freed. Writes are
 refused at open/strategy/character-I/O boundaries and no disk-write opcode is
 available. Source PID1 tests FWRITE rejection and two CRC-checked raw reads
-(8192 bytes from offset0, 512 bytes from offset512), retaining heartbeat output.
+(8192 bytes from offset8192, 512 bytes from offset8704), retaining heartbeat output.
 Host tests exercise the shared GPT and offset parser with valid/corrupt tables,
 duplicate/overlapping partitions, truncated formats and arithmetic boundaries.
 Build39443672315 at7bdcb7d succeeded. The kernel/init manifests were verified;
@@ -119,4 +119,9 @@ address: buf_map does not convert non-cluster B_PHYS buffers into kernel maps.
 The adapter now uses uiomove for character reads and refuses B_PHYS strategy
 buffers before mapping/copying them. Ordinary kernel/UPL block buffers retain
 the strategy path. PID1 additionally checks that a NULL user destination yields
-EFAULT before attempting valid CRC reads. This fix awaits build/hardware proof.
+EFAULT before attempting valid CRC reads. Fix build39446089277 atd784482 passed;
+the temporary hardware retest is pending. The initial offset0 Android baseline
+changed by32 bytes after Android remounting. The replacement range atoffset8192
+was independently captured and matched byte-for-byte across an Android reboot;
+it avoids those changing blocks. The test init can also be assembled locally
+with LLVM's Mach-O assembler and the existing relocation-rejecting mkinit tool.

@@ -1,6 +1,8 @@
 /* Source-only PID1 checks. Android baseline CRCs, no partition contents.
  * open(FWRITE) must fail EROFS. Only read/open/lseek/close syscalls follow.
- * Test both full 8KiB and 512-byte offset reads through BSD physio/strategy.
+ * Test an 8KiB read at offset8192 and a 512-byte read at offset8704.
+ * The first two userdata blocks contain mount-varying metadata and are not
+ * stable Android CRC baselines. These tests use the separate captured range.
  */
 #define SYS_read 3
 #define SYS_close 6
@@ -44,11 +46,13 @@ block_test:
     sub x2, x2, x1
     bl write_console
     mov x0, x20
-    mov x1, #0
+    mov x1, #8192
     mov x2, #0
     mov x16, #SYS_lseek
     svc #0x80
     b.cs block_read_fail
+    cmp x0, #8192
+    b.ne block_read_fail
     mov x0, x20
     mov x1, sp
     mov x2, #8192
@@ -60,8 +64,8 @@ block_test:
     mov x0, sp
     mov x1, #8192
     bl block_crc
-    mov w9, #0xceb3
-    movk w9, #0x4e1c, lsl #16
+    mov w9, #0xbb7c
+    movk w9, #0x0d4c, lsl #16
     cmp w0, w9
     b.ne block_read_fail
     adr x1, full_ok
@@ -69,12 +73,13 @@ block_test:
     sub x2, x2, x1
     bl write_console
     mov x0, x20
-    mov x1, #512
+    mov x1, #8704
     mov x2, #0                 /* SEEK_SET */
     mov x16, #SYS_lseek
     svc #0x80
     b.cs block_read_fail
-    cmp x0, #512
+    mov x9, #8704
+    cmp x0, x9
     b.ne block_read_fail
     mov x0, x20
     mov x1, sp
@@ -87,8 +92,8 @@ block_test:
     mov x0, sp
     mov x1, #512
     bl block_crc
-    mov w9, #0xf571
-    movk w9, #0x1ee5, lsl #16
+    mov w9, #0xd6b0
+    movk w9, #0x3261, lsl #16
     cmp w0, w9
     b.ne block_read_fail
     mov x0, x20
@@ -146,9 +151,9 @@ readonly_ok: .ascii "VERMEER BLOCK: FWRITE open refused EROFS: PASS\n"
 readonly_end:
 fault_ok: .ascii "VERMEER BLOCK: invalid user pointer refused EFAULT: PASS\n"
 fault_end:
-full_ok: .ascii "VERMEER BLOCK: raw 8192-byte read CRC matches Android: PASS\n"
+full_ok: .ascii "VERMEER BLOCK: offset8192 length8192 CRC matches Android: PASS\n"
 full_end:
-partial_ok: .ascii "VERMEER BLOCK: offset512 length512 CRC matches Android: PASS\n"
+partial_ok: .ascii "VERMEER BLOCK: offset8704 length512 CRC matches Android: PASS\n"
 partial_end:
 block_bad: .ascii "VERMEER BLOCK: USERSPACE READ TEST FAILED; RAM init remains alive\n"
 block_bad_end:
