@@ -6,3 +6,4 @@ device-audit/
 *.png
 out/
 __pycache__/
+.ci-patches/

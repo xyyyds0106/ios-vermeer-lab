@@ -15,3 +15,10 @@ cores and storage drivers remain unverified.
 
 The workflow is manual-only, has read-only repository permissions and a
 45-minute job limit. It does not contain Apple firmware or device dumps.
+
+The `vermeer-early` profile uses only patches 0001..0018 and adapts the early
+console to 0xb8000000 / 1440x3200 / stride 5760, and the virtual timer default
+to INTID 27. It intentionally excludes the later storage and peripheral drivers.
+It still uses the reference machine configuration name SWEET internally. A
+successful build is not proof it boots: vermeer ADT, validated RAM allocation
+and a v4 boot shim must be prepared before any device test.

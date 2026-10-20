@@ -1,4 +1,4 @@
-name: XNU reference build (not a K70 boot image)
+name: XNU bring-up lab
 
 permissions:
   contents: read
@@ -6,6 +6,11 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
+      profile:
+        description: reference reproduces upstream; vermeer-early has no storage drivers
+        type: choice
+        options: [vermeer-early, reference]
+        default: vermeer-early
       macos_version:
         description: macOS release whose xnu to build (13.5 = xnu-8796, iOS 16 era)
         default: "13.5"
@@ -20,7 +25,7 @@ on:
         default: "false"
 
 concurrency:
-  group: xnu-${{ github.ref }}
+  group: xnu-${{ github.ref }}-${{ inputs.profile || 'reference' }}
   cancel-in-progress: true
 
 env:
@@ -29,6 +34,7 @@ env:
   MACOS_VERSION: ${{ inputs.macos_version || '13.5' }}
   KERNEL_CONFIG: ${{ inputs.kernel_config || 'DEVELOPMENT' }}
   MACHINE_CONFIG: ${{ inputs.machine_config || 'SWEET' }}
+  PROFILE: ${{ inputs.profile || 'reference' }}
 
 jobs:
   build:
@@ -47,7 +53,15 @@ jobs:
           git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
           git -C dxb checkout -q FETCH_HEAD
           # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
-          cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
+          if [ "$PROFILE" = vermeer-early ]; then
+            python3 tools/prepare_vermeer.py xnu/patches .ci-patches
+            cp .ci-patches/*.patch dxb/patches/
+          elif [ "$PROFILE" = reference ]; then
+            cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
+          else
+            echo "Unknown profile" >&2
+            exit 1
+          fi
           # libfirehose_kernel is built arm64e-only; the SWEET kernel is plain arm64
           sed -i '' 's/ARCHS="x86_64 arm64e" VALID_ARCHS="x86_64 arm64e"/ARCHS="x86_64 arm64e arm64" VALID_ARCHS="x86_64 arm64e arm64"/' dxb/build.sh
           grep -c 'VALID_ARCHS="x86_64 arm64e arm64"' dxb/build.sh
