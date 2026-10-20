@@ -9,7 +9,7 @@ on:
       profile:
         description: reference reproduces upstream; vermeer-early has no storage drivers
         type: choice
-        options: [vermeer-early, vermeer-ramroot, vermeer-ufs-probe, reference]
+        options: [vermeer-early, vermeer-ramroot, vermeer-ufs-probe, vermeer-hfs-ramroot, reference]
         default: vermeer-early
       macos_version:
         description: macOS release whose xnu to build (13.5 = xnu-8796, iOS 16 era)
@@ -62,6 +62,9 @@ jobs:
           elif [ "$PROFILE" = vermeer-ufs-probe ]; then
             python3 tools/prepare_vermeer.py xnu/patches .ci-patches --ufs-probe
             cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
+          elif [ "$PROFILE" = vermeer-hfs-ramroot ]; then
+            python3 tools/prepare_vermeer.py xnu/patches .ci-patches --hfs-ramroot
+            cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
           elif [ "$PROFILE" = reference ]; then
             cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
           else
@@ -95,10 +98,20 @@ jobs:
         run: bash build.sh
 
       - name: Build minimal RAM-root init
-        if: ${{ success() && (env.PROFILE == 'vermeer-ramroot' || env.PROFILE == 'vermeer-ufs-probe') }}
+        if: ${{ success() && (env.PROFILE == 'vermeer-ramroot' || env.PROFILE == 'vermeer-ufs-probe' || env.PROFILE == 'vermeer-hfs-ramroot') }}
         run: |
           mkdir -p out
-          xcrun clang -target arm64-apple-ios16.0 -c tools/vermeer-init.S -o vermeer-init.o
+          cp tools/vermeer-init.S vermeer-init.S
+          if [ "$PROFILE" = vermeer-hfs-ramroot ]; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('vermeer-init.S')
+          s = p.read_text()
+          assert s.count('VERMEER userspace:') == 1
+          p.write_text(s.replace('VERMEER userspace:', 'VERMEER HFS userspace:'))
+          PY
+          fi
+          xcrun clang -target arm64-apple-ios16.0 -c vermeer-init.S -o vermeer-init.o
           python3 tools/mkinit.py vermeer-init.o out/vermeer-init
           (cd out && shasum -a 256 vermeer-init > INIT_SHA256)
 

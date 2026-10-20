@@ -12,9 +12,10 @@ import sys
 import difflib
 
 source, target = map(Path, sys.argv[1:3])
-ufs_probe = '--ufs-probe' in sys.argv[3:]
+hfs_ramroot = '--hfs-ramroot' in sys.argv[3:]
+ufs_probe = '--ufs-probe' in sys.argv[3:] or hfs_ramroot
 ramroot = '--ramroot' in sys.argv[3:] or ufs_probe
-last_patch = 25 if ramroot else 18
+last_patch = 27 if hfs_ramroot else (25 if ramroot else 18)
 target.mkdir(parents=True, exist_ok=True)
 if any(target.iterdir()):
     raise SystemExit('Destination must be empty')
@@ -53,7 +54,7 @@ if ufs_probe:
     (target / '0022-vermeer-ufs-read-probe-source.patch').write_text(generated)
 if ramroot:
     stages = sorted(p for p in source.glob('*.sh') if int(p.name[:4]) <= last_patch)
-    assert len(stages) == 2, 'Expected libpthread and BearSSL staging scripts'
+    assert len(stages) == (3 if hfs_ramroot else 2), 'Unexpected staging scripts'
     for stage in stages:
         shutil.copyfile(stage, target / stage.name)
 print(f'vermeer early profile: {len(patches)} reference patches plus {len(extras)} vermeer patches; changes: {counts}')

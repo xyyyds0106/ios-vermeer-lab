@@ -81,3 +81,10 @@ The photograph shows allocated DMA PA c2174000, successful Active/TUR/capacity/
 md0 root and continuing PID1 heartbeats. This verifies kernel-mode read DMA
 with MMU/cache enabled and preserves the RAM-root test. No filesystem on UFS
 has been mounted, and Apple userspace/iOS remain unverified.
+
+The `vermeer-hfs-ramroot` profile adds reference patches0026/0027 and the pinned
+Apple OSS HFS staging script. It retains the verified opt-in UFS self-test and
+builds a source PID1 labeled `VERMEER HFS userspace`. Package that executable
+inside a small HFSX RAM disk, not as a raw mockfs executable. The test is meant
+to verify actual filesystem mounting and reading while leaving phone storage
+untouched. HFS-on-K70 and this profile are still unverified on hardware.
