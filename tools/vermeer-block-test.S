@@ -14,6 +14,7 @@ block_test:
     stp x29, x30, [sp]
     stp x20, x21, [sp, #16]
     sub sp, sp, #8192
+    mov x21, #0
     adr x0, block_path
     mov x1, #O_RDWR
     mov x2, #0
@@ -106,6 +107,7 @@ block_test:
     /* VBLK read goes through spec_read -> buf_bread -> vb_strategy, then
      * spec_read's uiomove. This is separate from the raw character path.
      */
+    mov x21, #5                 /* stage5: VBLK open */
     adr x0, cached_path
     mov x1, #0
     mov x2, #0
@@ -113,6 +115,7 @@ block_test:
     svc #0x80
     b.cs block_fail
     mov x20, x0
+    mov x21, #6                 /* stage6: VBLK seek */
     mov x1, #8192
     mov x2, #0
     mov x16, #SYS_lseek
@@ -120,6 +123,7 @@ block_test:
     b.cs block_read_fail
     cmp x0, #8192
     b.ne block_read_fail
+    mov x21, #7                 /* stage7: VBLK read */
     mov x0, x20
     mov x1, sp
     mov x2, #8192
@@ -128,6 +132,7 @@ block_test:
     b.cs block_read_fail
     cmp x0, #8192
     b.ne block_read_fail
+    mov x21, #8                 /* stage8: VBLK CRC */
     mov x0, sp
     mov x1, #8192
     bl block_crc
@@ -148,10 +153,14 @@ block_writable:
     svc #0x80                  /* unexpected open; still never issue a write */
     b block_fail
 block_read_fail:
+    bl block_report
     mov x0, x20
     mov x16, #SYS_close
     svc #0x80
+    b block_fail_message
 block_fail:
+    bl block_report
+block_fail_message:
     adr x1, block_bad
     adr x2, block_bad_end
     sub x2, x2, x1
@@ -161,6 +170,51 @@ block_done:
     ldp x29, x30, [sp]
     ldp x20, x21, [sp, #16]
     add sp, sp, #32
+    ret
+
+/* Print stage and the syscall return/errno or calculated CRC before closing. */
+block_report:
+    sub sp, sp, #32
+    stp x29, x30, [sp]
+    str x0, [sp, #16]
+    adr x1, report_stage
+    adr x2, report_stage_end
+    sub x2, x2, x1
+    bl write_console
+    mov x0, x21
+    bl block_hex
+    adr x1, report_value
+    adr x2, report_value_end
+    sub x2, x2, x1
+    bl write_console
+    ldr x0, [sp, #16]
+    bl block_hex
+    ldp x29, x30, [sp]
+    add sp, sp, #32
+    ret
+block_hex:
+    sub sp, sp, #48
+    stp x29, x30, [sp, #32]
+    mov x9, x0
+    mov x10, #16
+    mov x11, sp
+3:
+    lsr x12, x9, #60
+    cmp x12, #10
+    add x13, x12, #'0'
+    add x12, x12, #('a' - 10)
+    csel x12, x13, x12, lo
+    strb w12, [x11], #1
+    lsl x9, x9, #4
+    subs x10, x10, #1
+    b.ne 3b
+    mov w12, #10
+    strb w12, [x11]
+    mov x1, sp
+    mov x2, #17
+    bl write_console
+    ldp x29, x30, [sp, #32]
+    add sp, sp, #48
     ret
 
 /* IEEE CRC32; input x0 pointer, x1 bytes, output w0. */
@@ -197,5 +251,9 @@ partial_ok: .ascii "VERMEER BLOCK: offset8704 length512 CRC matches Android: PAS
 partial_end:
 cached_ok: .ascii "VERMEER BLOCK: VFS block-device read CRC matches Android: PASS\n"
 cached_end:
+report_stage: .ascii "VERMEER BLOCK: FAILED STAGE (5=open 6=seek 7=read 8=crc): "
+report_stage_end:
+report_value: .ascii "VERMEER BLOCK: RETURN/ERRNO/CRC: "
+report_value_end:
 block_bad: .ascii "VERMEER BLOCK: DEVICE READ TEST FAILED; RAM init remains alive\n"
 block_bad_end:
