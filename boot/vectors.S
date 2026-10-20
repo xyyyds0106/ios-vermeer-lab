@@ -69,4 +69,3 @@ exc_common:
 	add	sp, sp, #(30 * 8)
 	ldp	x29, x30, [sp], #16
 	eret
-
