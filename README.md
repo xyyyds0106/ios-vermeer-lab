@@ -10,10 +10,11 @@ and the original source and dependency licensing applies.
 
 Confirmed on one K70 through custom temporary probes: linear framebuffer
 output, EL1 execution, 19.2 MHz counter, 16KB MMU and caches, virtual timer IRQs,
-and sparse access to the selected 256MB RAM window. A photograph of XNU
-attempt 002 confirms early kernel execution and a subsequent console-mapping
-panic. No root filesystem, userspace or iOS interface has run. Secondary cores
-and storage drivers remain unverified.
+and sparse access to the selected 256MB RAM window. XNU now boots a source-built
+PID1 from a journaled HFSX RAM root and independently verifies UFS reads against
+Android's CRC baseline. Secondary cores, a filesystem root on UFS, Apple
+userspace and an iOS interface remain unverified. The following entries record
+the individual milestones, including failures that have since been resolved.
 
 The workflow is manual-only, has read-only repository permissions and a
 45-minute job limit. It does not contain Apple firmware or device dumps.
@@ -87,4 +88,9 @@ Apple OSS HFS staging script. It retains the verified opt-in UFS self-test and
 builds a source PID1 labeled `VERMEER HFS userspace`. Package that executable
 inside a small HFSX RAM disk, not as a raw mockfs executable. The test is meant
 to verify actual filesystem mounting and reading while leaving phone storage
-untouched. HFS-on-K70 and this profile are still unverified on hardware.
+untouched. A hardware photograph now confirms `hfs: mounted VermeerHFSTest`,
+`VERMEER HFS userspace: init running as PID 1` and continuing heartbeats, after
+the retained UFS CRC self-test passes and restores the firmware queue.
+Checkpoint: commit43261fa, Actions run39439982542, image SHA256
+125d3b232f6411461cff5628522b49ff4e94adaab807cd323e21a5116715facf.
+This is a real HFSX RAM filesystem, not Apple launchd or an iOS interface.
