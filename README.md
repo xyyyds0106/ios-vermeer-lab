@@ -125,3 +125,12 @@ changed by32 bytes after Android remounting. The replacement range atoffset8192
 was independently captured and matched byte-for-byte across an Android reboot;
 it avoids those changing blocks. The test init can also be assembled locally
 with LLVM's Mach-O assembler and the existing relocation-rejecting mkinit tool.
+
+The corrected raw-user-read path is now hardware-verified by a photograph:
+FWRITE rejection, NULL-destination EFAULT and both Android CRC reads all PASS,
+with many continuing PID1 heartbeats. Checkpoint: kernel build39446089277 at
+d784482, test-init source9d79fae, boot image003 SHA256
+c58dbc176a6557e068d989170ab080d931b23438467972787778d27390a79ab8.
+Keep this image as the regression version. The BSD block-device/VFS path and
+an actual filesystem mount on UFS still need separate validation; this is
+HFSX RAM root plus raw UFS reads, with no Apple userspace or iOS interface.
