@@ -141,3 +141,16 @@ strategy with kernel cache buffers, then its own uiomove; this separately
 exercises the filesystem-facing path and multi-request16KiB cache-buffer fill.
 Kernel build39446089277 remains unchanged. Temporary image004 is awaiting its
 screen result; do not infer a UFS filesystem mount from a block-read result.
+
+Diagnostic005 confirms stage7 (VBLK read) fails with errno0x16/EINVAL; open and
+seek succeeded and all raw checks still pass. Exact XNU specfs set_blocksize
+uses d_psize as the logical sector byte size. The adapter incorrectly returned
+the partition's sector count, causing spec_read's v_specsize > PAGE_SIZE check
+to fail before any block-strategy I/O. d_psize now returns secsize; block count
+continues to come from DKIOCGETBLOCKCOUNT. Build and real-device validation of
+this change are pending.
+
+At the user's request on2026-10-20, continue COMPUTER-ONLY preparation overnight.
+Do not run adb/fastboot, reboot, boot, flash or otherwise operate the phone until
+the user resumes real-device testing tomorrow. Preserve the confirmed003 image,
+stock backups and failed-test evidence. No Apple userspace/iOS GUI is verified.

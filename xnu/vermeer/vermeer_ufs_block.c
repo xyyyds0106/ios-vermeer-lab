@@ -152,7 +152,14 @@ static int vb_bioctl(dev_t d, u_long c, caddr_t a, int f, struct proc *p)
 static int vb_cioctl(dev_t d, u_long c, caddr_t a, int f, struct proc *p)
 { return vb_ioctl(d, c, a, f, p, true); }
 static int vb_psize(__unused dev_t d)
-{ return vb.ready && !vb.failed ? (int)MIN(vb.blocks * 4096 / vb.secsize, INT_MAX) : -1; }
+{
+    /* XNU specfs set_blocksize() stores d_psize's return in v_specsize.
+     * This callback is a sector BYTE SIZE here, not a partition sector count.
+     * Returning the count makes spec_read reject v_specsize > PAGE_SIZE.
+     * Geometry remains available separately through DKIOCGETBLOCKCOUNT.
+     */
+    return vb.ready && !vb.failed ? (int)vb.secsize : -1;
+}
 static int vb_read(dev_t d, struct uio *u, __unused int f)
 {
     if (minor(d) || !vb.ready || vb.failed) return ENXIO;
