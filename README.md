@@ -150,6 +150,12 @@ to fail before any block-strategy I/O. d_psize now returns secsize; block count
 continues to come from DKIOCGETBLOCKCOUNT. Build and real-device validation of
 this change are pending.
 
+The sector-size fix now compiles successfully: Actions39451667461 at3c98f69,
+kernelSHA92111656b82eda7e1be4cd6f629c57bc7bb27f72e17ba5670bd1d4543d6e83f8.
+Image006 has been packaged and checked offline (SHA256
+0103319abed9222965605294b7022047237b0c19471b0f3f154df1a5ce0b5459), retaining
+the diagnostic source PID1 and proven HFSX RAM root. It has NOT been booted.
+
 At the user's request on2026-10-20, continue COMPUTER-ONLY preparation overnight.
 Do not run adb/fastboot, reboot, boot, flash or otherwise operate the phone until
 the user resumes real-device testing tomorrow. Preserve the confirmed003 image,
