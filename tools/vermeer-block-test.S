@@ -103,6 +103,45 @@ block_test:
     adr x2, partial_end
     sub x2, x2, x1
     bl write_console
+    /* VBLK read goes through spec_read -> buf_bread -> vb_strategy, then
+     * spec_read's uiomove. This is separate from the raw character path.
+     */
+    adr x0, cached_path
+    mov x1, #0
+    mov x2, #0
+    mov x16, #SYS_open
+    svc #0x80
+    b.cs block_fail
+    mov x20, x0
+    mov x1, #8192
+    mov x2, #0
+    mov x16, #SYS_lseek
+    svc #0x80
+    b.cs block_read_fail
+    cmp x0, #8192
+    b.ne block_read_fail
+    mov x0, x20
+    mov x1, sp
+    mov x2, #8192
+    mov x16, #SYS_read
+    svc #0x80
+    b.cs block_read_fail
+    cmp x0, #8192
+    b.ne block_read_fail
+    mov x0, sp
+    mov x1, #8192
+    bl block_crc
+    mov w9, #0xbb7c
+    movk w9, #0x0d4c, lsl #16
+    cmp w0, w9
+    b.ne block_read_fail
+    mov x0, x20
+    mov x16, #SYS_close
+    svc #0x80
+    adr x1, cached_ok
+    adr x2, cached_end
+    sub x2, x2, x1
+    bl write_console
     b block_done
 block_writable:
     mov x16, #SYS_close
@@ -147,6 +186,7 @@ block_crc:
     ret
 
 block_path: .asciz "/dev/rvermeerufs0"
+cached_path: .asciz "/dev/vermeerufs0"
 readonly_ok: .ascii "VERMEER BLOCK: FWRITE open refused EROFS: PASS\n"
 readonly_end:
 fault_ok: .ascii "VERMEER BLOCK: invalid user pointer refused EFAULT: PASS\n"
@@ -155,5 +195,7 @@ full_ok: .ascii "VERMEER BLOCK: offset8192 length8192 CRC matches Android: PASS\
 full_end:
 partial_ok: .ascii "VERMEER BLOCK: offset8704 length512 CRC matches Android: PASS\n"
 partial_end:
-block_bad: .ascii "VERMEER BLOCK: USERSPACE READ TEST FAILED; RAM init remains alive\n"
+cached_ok: .ascii "VERMEER BLOCK: VFS block-device read CRC matches Android: PASS\n"
+cached_end:
+block_bad: .ascii "VERMEER BLOCK: DEVICE READ TEST FAILED; RAM init remains alive\n"
 block_bad_end:

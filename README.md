@@ -134,3 +134,10 @@ c58dbc176a6557e068d989170ab080d931b23438467972787778d27390a79ab8.
 Keep this image as the regression version. The BSD block-device/VFS path and
 an actual filesystem mount on UFS still need separate validation; this is
 HFSX RAM root plus raw UFS reads, with no Apple userspace or iOS interface.
+
+The next source-init test additionally opens `/dev/vermeerufs0` (VBLK) and reads
+the same8192-byte Android baseline. XNU spec_read uses buf_bread and the block
+strategy with kernel cache buffers, then its own uiomove; this separately
+exercises the filesystem-facing path and multi-request16KiB cache-buffer fill.
+Kernel build39446089277 remains unchanged. Temporary image004 is awaiting its
+screen result; do not infer a UFS filesystem mount from a block-read result.
