@@ -44,6 +44,9 @@ def build():
                        ('compatible', string('sweet-io') + string('arm-io')),
                        ('#address-cells', u32(2)), ('#size-cells', u32(2)),
                        ('ranges', u64(0, 0x01000000, 0xff000000))],
+             # pe_init_fiq adds pe_arm_get_soc_base_phys(), obtained from the
+             # arm-io ranges parent base above (0x01000000). These are offsets:
+             # 0x16100000 + 0x01000000 = physical GICD 0x17100000, likewise GICR.
              [node('gic', [('compatible', string('arm,gic-v3')), ('interrupt-controller', b''),
                            ('virtual-timer-intid', u32(27)),
                            ('reg', u64(0x16100000, 0x10000, 0x16180000, 0x200000))])]),
