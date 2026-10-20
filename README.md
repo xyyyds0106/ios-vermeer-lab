@@ -94,3 +94,18 @@ the retained UFS CRC self-test passes and restores the firmware queue.
 Checkpoint: commit43261fa, Actions run39439982542, image SHA256
 125d3b232f6411461cff5628522b49ff4e94adaab807cd323e21a5116715facf.
 This is a real HFSX RAM filesystem, not Apple launchd or an iOS interface.
+
+The `vermeer-ufs-block` profile retains HFSX RAM root and adds an opt-in
+read-only BSD adapter (`vermeer_ufs_block=1 rd=md0`). It first runs the verified
+LUN0 CRC test, validates the primary GPT header/entry CRCs and all partition
+ranges/overlaps, then requires userdata's independent Android start/size.
+Only that partition is exposed at `/dev/{r,}vermeerufs0`. Transport reads use
+the existing guarded, cache-synchronized 8KiB DMA buffer. Any transfer error
+disables further reads; pending DMA is never retried or freed. Writes are
+refused at open/strategy/character-I/O boundaries and no disk-write opcode is
+available. Source PID1 tests FWRITE rejection and two CRC-checked raw reads
+(8192 bytes from offset0, 512 bytes from offset512), retaining heartbeat output.
+Host tests exercise the shared GPT and offset parser with valid/corrupt tables,
+duplicate/overlapping partitions, truncated formats and arithmetic boundaries.
+This profile is awaiting its first build and hardware result; it does not mount
+the Android filesystem or select UFS as the boot root.

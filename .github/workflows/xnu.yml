@@ -9,7 +9,7 @@ on:
       profile:
         description: reference reproduces upstream; vermeer-early has no storage drivers
         type: choice
-        options: [vermeer-early, vermeer-ramroot, vermeer-ufs-probe, vermeer-hfs-ramroot, reference]
+        options: [vermeer-early, vermeer-ramroot, vermeer-ufs-probe, vermeer-hfs-ramroot, vermeer-ufs-block, reference]
         default: vermeer-early
       macos_version:
         description: macOS release whose xnu to build (13.5 = xnu-8796, iOS 16 era)
@@ -65,6 +65,9 @@ jobs:
           elif [ "$PROFILE" = vermeer-hfs-ramroot ]; then
             python3 tools/prepare_vermeer.py xnu/patches .ci-patches --hfs-ramroot
             cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
+          elif [ "$PROFILE" = vermeer-ufs-block ]; then
+            python3 tools/prepare_vermeer.py xnu/patches .ci-patches --ufs-block
+            cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
           elif [ "$PROFILE" = reference ]; then
             cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
           else
@@ -98,10 +101,13 @@ jobs:
         run: bash build.sh
 
       - name: Build minimal RAM-root init
-        if: ${{ success() && (env.PROFILE == 'vermeer-ramroot' || env.PROFILE == 'vermeer-ufs-probe' || env.PROFILE == 'vermeer-hfs-ramroot') }}
+        if: ${{ success() && (env.PROFILE == 'vermeer-ramroot' || env.PROFILE == 'vermeer-ufs-probe' || env.PROFILE == 'vermeer-hfs-ramroot' || env.PROFILE == 'vermeer-ufs-block') }}
         run: |
           mkdir -p out
           cp tools/vermeer-init.S vermeer-init.S
+          if [ "$PROFILE" = vermeer-ufs-block ]; then
+            python3 tools/make_block_init.py tools/vermeer-init.S tools/vermeer-block-test.S vermeer-init.S
+          fi
           if [ "$PROFILE" = vermeer-hfs-ramroot ]; then
             python3 - <<'PY'
           from pathlib import Path

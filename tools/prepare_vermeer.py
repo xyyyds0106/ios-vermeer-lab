@@ -12,7 +12,8 @@ import sys
 import difflib
 
 source, target = map(Path, sys.argv[1:3])
-hfs_ramroot = '--hfs-ramroot' in sys.argv[3:]
+ufs_block = '--ufs-block' in sys.argv[3:]
+hfs_ramroot = '--hfs-ramroot' in sys.argv[3:] or ufs_block
 ufs_probe = '--ufs-probe' in sys.argv[3:] or hfs_ramroot
 ramroot = '--ramroot' in sys.argv[3:] or ufs_probe
 last_patch = 27 if hfs_ramroot else (25 if ramroot else 18)
@@ -42,10 +43,22 @@ if ufs_probe:
     extras += ('0021-vermeer-ufs-read-probe-hook.patch',)
 for name in extras:
     extra = source.parent / 'vermeer' / name
-    shutil.copyfile(extra, target / extra.name)
+    if ufs_block and name == '0021-vermeer-ufs-read-probe-hook.patch':
+        data = extra.read_text()
+        data = data.replace('bsd/dev/vermeer_ufs_probe.c', 'bsd/dev/vermeer_ufs_block.c')
+        data = data.replace('vermeer_ufs_probe', 'vermeer_ufs_block_init')
+        data = data.replace('self-test returned', 'block adapter returned')
+        # The opt-in bootarg is short and separate from the established probe.
+        data = data.replace('"vermeer_ufs_block_init"', '"vermeer_ufs_block"')
+        (target / extra.name).write_text(data)
+    else:
+        shutil.copyfile(extra, target / extra.name)
 if ufs_probe:
     generated = ''
-    for name in ('vermeer_ufs_probe.c', 'vermeer_ufs_response.h'):
+    names = ('vermeer_ufs_probe.c', 'vermeer_ufs_response.h')
+    if ufs_block:
+        names += ('vermeer_ufs_block.c', 'vermeer_gpt.h')
+    for name in names:
         data = (source.parent / 'vermeer' / name).read_text()
         path = 'bsd/dev/' + name
         generated += f'diff --git a/{path} b/{path}\nnew file mode 100644\n'

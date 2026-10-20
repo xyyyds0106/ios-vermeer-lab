@@ -138,13 +138,21 @@ static int identity_candidate(void)
 /* Opcode/length allowlist prevents accidental storage-mutating commands.
  * On timeout, stop: never ring a second request on an outstanding transfer.
  */
-static int scsi(uint8_t opcode, unsigned length, uint32_t *ocs, uint32_t *status)
+static int scsi_at(uint8_t opcode, unsigned length, uint32_t lba,
+                   uint32_t *ocs, uint32_t *status)
 {
     static uint8_t tag;
     last_sense.response = last_sense.key = last_sense.asc = last_sense.ascq = 0xff;
     if (!((opcode == 0 && length == 0) || (opcode == 0x1b && length == 0) ||
           (opcode == 0x25 && length == 8) ||
-          (opcode == 0x28 && length == 8192))) return 10;
+          (opcode == 0x28 &&
+#if defined(VERMEER_UFS_BLOCK)
+           length && length <= 8192 && !(length % 4096) &&
+           lba <= EXPECTED_LAST_LBA && length / 4096 <= EXPECTED_LAST_LBA + 1U - lba
+#else
+           length == 8192 && lba == 0
+#endif
+          ))) return 10;
     if (rd(UFS + 0x58) || rd(UFS + 0x50) != dma_pa || rd(UFS + 0x54) ||
         rd(UFS + 0x60) != 1) return 11;
     zero(DMA, 32);
@@ -162,7 +170,14 @@ static int scsi(uint8_t opcode, unsigned length, uint32_t *ocs, uint32_t *status
     cmd[15] = length;
     cmd[16] = opcode;
     if (opcode == 0x1b) cmd[20] = 0x10; /* Active power mode, as Linux. */
-    if (opcode == 0x28) cmd[24] = 2; /* READ10 LBA0, exactly two 4K blocks. */
+    if (opcode == 0x28) {
+        cmd[18] = lba >> 24;
+        cmd[19] = lba >> 16;
+        cmd[20] = lba >> 8;
+        cmd[21] = lba;
+        cmd[23] = (length / 4096) >> 8;
+        cmd[24] = length / 4096;
+    }
     volatile uint32_t *utrd = (volatile uint32_t *)DMA;
     utrd[0] = (1U << 28) | ((length ? 2U : 0U) << 25) | (1U << 24);
     utrd[2] = 15;
@@ -187,6 +202,11 @@ static int scsi(uint8_t opcode, unsigned length, uint32_t *ocs, uint32_t *status
     volatile uint8_t *resp = (volatile uint8_t *)(COMMAND + 512);
     *status = resp[7];
     return ufs_decode_response_lun(resp, tag, lun, *ocs, &last_sense);
+}
+
+static int scsi(uint8_t opcode, unsigned length, uint32_t *ocs, uint32_t *status)
+{
+    return scsi_at(opcode, length, 0, ocs, status);
 }
 
 static void result(unsigned row, const char *label, int rc, uint32_t ocs, uint32_t status)
