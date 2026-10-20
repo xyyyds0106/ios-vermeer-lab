@@ -88,6 +88,11 @@ static void vb_strategy(buf_t bp)
     int error = 0;
     buf_setresid(bp, count);
     if (!(buf_flags(bp) & B_READ)) { error = EROFS; goto done; }
+    /* physio's B_PHYS b_datap is a USER address. buf_map returns that address
+     * unchanged for a non-cluster buffer; it does not create a kernel mapping.
+     * Raw character reads below use uiomove instead. Never memcpy B_PHYS here.
+     */
+    if (buf_flags(bp) & B_PHYS) { error = EINVAL; goto done; }
     if (!vb.ready || vb.failed || minor(buf_device(bp))) { error = ENXIO; goto done; }
     if (!count) goto done;
     if (buf_map(bp, &va)) { error = EIO; goto done; }
@@ -149,7 +154,30 @@ static int vb_cioctl(dev_t d, u_long c, caddr_t a, int f, struct proc *p)
 static int vb_psize(__unused dev_t d)
 { return vb.ready && !vb.failed ? (int)MIN(vb.blocks * 4096 / vb.secsize, INT_MAX) : -1; }
 static int vb_read(dev_t d, struct uio *u, __unused int f)
-{ return physio(vb_strategy, NULL, d, B_READ, minphys, u, (int)vb.secsize); }
+{
+    if (minor(d) || !vb.ready || vb.failed) return ENXIO;
+    int64_t offset = uio_offset(u), residual = uio_resid(u);
+    uint64_t part_bytes = vb.blocks * 4096;
+    if (offset < 0 || residual < 0 || (uint64_t)offset > part_bytes) return EINVAL;
+    int error = 0;
+    lck_mtx_lock(&vermeer_ufs_lock);
+    while (uio_resid(u) > 0 && (uint64_t)uio_offset(u) < part_bytes) {
+        uint64_t pos = (uint64_t)uio_offset(u);
+        unsigned skip = pos % 4096;
+        unsigned want = (unsigned)MIN((uint64_t)uio_resid(u), 8192 - skip);
+        want = (unsigned)MIN((uint64_t)want, part_bytes - pos);
+        unsigned blocks = (skip + want + 4095) / 4096;
+        error = vb_read_blocks(vb.first + pos / 4096, blocks);
+        if (error) break;
+        /* uiomove uses the UIO address-space tag and copyout fault recovery.
+         * It updates the file offset/residual only for bytes actually copied.
+         */
+        error = uiomove((caddr_t)(DATA + skip), (int)want, u);
+        if (error) break;
+    }
+    lck_mtx_unlock(&vermeer_ufs_lock);
+    return error;
+}
 static int vb_write(__unused dev_t d, __unused struct uio *u, __unused int f)
 { return EROFS; }
 static const struct bdevsw vb_bdevsw = {

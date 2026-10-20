@@ -111,3 +111,12 @@ Build39443672315 at7bdcb7d succeeded. The kernel/init manifests were verified;
 the new HFSX RAM disk passed offline fsck. The temporary device test is awaiting
 screen evidence; it does not mount the Android filesystem or select UFS as the
 boot root. Build success and bootloader acceptance are not read-test success.
+
+The first block-adapter photograph confirms GPT validation, device registration,
+HFSX RAM root/PID1 and FWRITE rejection, followed by a data abort in memmove
+(pc fffffe0007b102d8, lr vb_strategy+0x210). The raw physio buffer was a user
+address: buf_map does not convert non-cluster B_PHYS buffers into kernel maps.
+The adapter now uses uiomove for character reads and refuses B_PHYS strategy
+buffers before mapping/copying them. Ordinary kernel/UPL block buffers retain
+the strategy path. PID1 additionally checks that a NULL user destination yields
+EFAULT before attempting valid CRC reads. This fix awaits build/hardware proof.

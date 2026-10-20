@@ -31,6 +31,25 @@ block_test:
     svc #0x80
     b.cs block_fail
     mov x20, x0
+    /* Invalid destination must be EFAULT, not a kernel data abort. */
+    mov x1, #0
+    mov x2, #512
+    mov x16, #SYS_read
+    svc #0x80
+    b.cc block_read_fail
+    cmp x0, #14                 /* Darwin EFAULT */
+    b.ne block_read_fail
+    adr x1, fault_ok
+    adr x2, fault_end
+    sub x2, x2, x1
+    bl write_console
+    mov x0, x20
+    mov x1, #0
+    mov x2, #0
+    mov x16, #SYS_lseek
+    svc #0x80
+    b.cs block_read_fail
+    mov x0, x20
     mov x1, sp
     mov x2, #8192
     mov x16, #SYS_read
@@ -125,6 +144,8 @@ block_crc:
 block_path: .asciz "/dev/rvermeerufs0"
 readonly_ok: .ascii "VERMEER BLOCK: FWRITE open refused EROFS: PASS\n"
 readonly_end:
+fault_ok: .ascii "VERMEER BLOCK: invalid user pointer refused EFAULT: PASS\n"
+fault_end:
 full_ok: .ascii "VERMEER BLOCK: raw 8192-byte read CRC matches Android: PASS\n"
 full_end:
 partial_ok: .ascii "VERMEER BLOCK: offset512 length512 CRC matches Android: PASS\n"
