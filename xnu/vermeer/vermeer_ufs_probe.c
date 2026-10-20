@@ -100,7 +100,7 @@ static uint32_t be32(uintptr_t p)
     volatile const uint8_t *b = (volatile const uint8_t *)p;
     return (uint32_t)b[0] << 24 | (uint32_t)b[1] << 16 | (uint32_t)b[2] << 8 | b[3];
 }
-static uint32_t crc32(uintptr_t p, unsigned n)
+static uint32_t vermeer_ufs_crc32(uintptr_t p, unsigned n)
 {
     uint32_t crc = ~0U;
     for (unsigned i = 0; i < n; i++) {
@@ -279,10 +279,10 @@ int vermeer_ufs_probe(void)
     rc = scsi(0x28, 8192, &ocs, &status);
     result(16, "READ RC/OCS/STATUS: ", rc, ocs, status);
     if (rc) goto done;
-    unsigned differences = crc32(DATA, 8192) != EXPECTED_CRC32;
+    unsigned differences = vermeer_ufs_crc32(DATA, 8192) != EXPECTED_CRC32;
     hex(18, "BYTES READ: ", 8192);
     hex(19, "CRC CHECK FAILED (0=OK): ", differences);
-    hex(20, "READ CRC32: ", crc32(DATA, 8192));
+    hex(20, "READ CRC32: ", vermeer_ufs_crc32(DATA, 8192));
     hex(21, "ANDROID CRC32: ", EXPECTED_CRC32);
     text(23, differences ? "UFS READ: DATA MISMATCH" : "XNU UFS READ: PASS - ANDROID CRC MATCH");
     rc = differences ? 13 : 0;
