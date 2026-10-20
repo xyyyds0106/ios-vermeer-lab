@@ -8,15 +8,18 @@ https://github.com/dipa-studio/ios-sweet at
 not be booted or flashed on vermeer. The patch authors retain their copyright
 and the original source and dependency licensing applies.
 
-Confirmed independently on one K70: temporary boot v4 diagnostic image,
-linear framebuffer output, EL1 execution, 19.2 MHz counter, 16KB MMU and caches.
-XNU and iOS have not been booted on this device. Interrupt delivery, secondary
-cores and storage drivers remain unverified.
+Confirmed on one K70 through custom temporary probes: linear framebuffer
+output, EL1 execution, 19.2 MHz counter, 16KB MMU and caches, virtual timer IRQs,
+and sparse access to the selected 256MB RAM window. A photograph of XNU
+attempt 002 confirms early kernel execution and a subsequent console-mapping
+panic. No root filesystem, userspace or iOS interface has run. Secondary cores
+and storage drivers remain unverified.
 
 The workflow is manual-only, has read-only repository permissions and a
 45-minute job limit. It does not contain Apple firmware or device dumps.
 
-The `vermeer-early` profile uses only patches 0001..0018 and adapts the early
+The `vermeer-early` profile uses reference patches 0001..0018 plus a targeted
+early I/O page-table budget patch. It adapts the early
 console to 0xb8000000 / 1440x3200 / stride 5760, and the virtual timer default
 to INTID 27. It intentionally excludes the later storage and peripheral drivers.
 It still uses the reference machine configuration name SWEET internally. A
