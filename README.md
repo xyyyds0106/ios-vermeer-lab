@@ -43,3 +43,10 @@ initialization logs, stopping after platform-expert registration. The ADT's
 boot CPU is correctly `arm,cortex-a510`, but the reference CPU service matched
 only `qcom,kryo470`. The vermeer profile now matches the actual Cortex-A510 node
 and keeps the reference single-core CPU registration and SGI self-test.
+
+Fourth attempt confirms `boot CPU 0 registered, SGI1 verified, initialization
+complete` and BSD initialization. The `vermeer-ramroot` profile adds reference
+patches through 0025 (libpthread, portable crypto, mockfs memory root and the
+no-entitlements AMFI provider). It builds a source-only static PID 1 test
+program, served as `/sbin/launchd` by mockfs. This test uses RAM only and contains
+no Apple userspace firmware, no UFS driver and no iOS interface.
