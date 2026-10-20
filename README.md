@@ -107,5 +107,7 @@ available. Source PID1 tests FWRITE rejection and two CRC-checked raw reads
 (8192 bytes from offset0, 512 bytes from offset512), retaining heartbeat output.
 Host tests exercise the shared GPT and offset parser with valid/corrupt tables,
 duplicate/overlapping partitions, truncated formats and arithmetic boundaries.
-This profile is awaiting its first build and hardware result; it does not mount
-the Android filesystem or select UFS as the boot root.
+Build39443672315 at7bdcb7d succeeded. The kernel/init manifests were verified;
+the new HFSX RAM disk passed offline fsck. The temporary device test is awaiting
+screen evidence; it does not mount the Android filesystem or select UFS as the
+boot root. Build success and bootloader acceptance are not read-test success.
