@@ -5,10 +5,14 @@
 static struct vl_ring log_ring;
 static uint32_t _Atomic log_lock;
 static uint64_t _Atomic dropped;
+typedef int (*vermeer_sample_request_fn)(void);
+static vermeer_sample_request_fn _Atomic sample_request;
 void vermeer_debug_append(const char *data, int size);
 unsigned vermeer_debug_copy(uint64_t *pos, char *out, unsigned max);
 uint64_t vermeer_debug_total(void);
 uint64_t vermeer_debug_dropped(void);
+void vermeer_debug_sample_register(vermeer_sample_request_fn);
+int vermeer_debug_sample_request(void);
 void vermeer_debug_append(const char *data, int size)
 {
     if (size<=0) return;
@@ -33,3 +37,16 @@ uint64_t vermeer_debug_total(void)
     return n;
 }
 uint64_t vermeer_debug_dropped(void) { return os_atomic_load(&dropped,relaxed); }
+/* The optional GUI sampler owns this callback. USB only queues work; it
+ * never walks another task's VM or blocks the controller polling thread.
+ * The callback lives in the kernel permanently, including after unregister.
+ */
+void vermeer_debug_sample_register(vermeer_sample_request_fn callback)
+{
+    os_atomic_store(&sample_request,callback,release);
+}
+int vermeer_debug_sample_request(void)
+{
+    vermeer_sample_request_fn callback=os_atomic_load(&sample_request,acquire);
+    return callback ? callback() : 0;
+}

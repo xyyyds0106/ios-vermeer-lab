@@ -1,6 +1,15 @@
 # vermeer XNU bring-up lab
 
-Private experiment for Redmi K70 (vermeer / SM8550).
+Experimental bring-up for Redmi K70 (vermeer / SM8550).
+
+GUI006s reuses the verified GUI006 kernel with selected-process sampling.
+Repeated symbolicated snapshots show SpringBoard waiting for the system-shell
+check-in, backboardd waiting for DataMigration, and the migration daemon waiting
+for its plugin wrapper. The wrapper waits inside a dynamically loaded module;
+its exact path is not yet captured. GUI007 adds bounded dyld image maps and a
+USB `sample` request on the existing worker, preserving graphics and storage
+behavior. Local affected-source compiles and ASan/UBSan boundary checks pass;
+the full build and new hardware result remain pending. No root reflash is needed.
 
 Integrated GUI006 (`c6fadce`, Actions39544696722) temporarily boots on the K70
 and passes first presentation: backboardd alternates two 1125x2436 BGRA

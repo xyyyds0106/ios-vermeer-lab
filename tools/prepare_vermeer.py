@@ -113,6 +113,13 @@ if gui:
                     target / '0060-vermeer-gui-guards.patch')
     shutil.copyfile(source.parent / 'vermeer/0061-vermeer-gui-present.patch',
                     target / '0061-vermeer-gui-present.patch')
+    shutil.copyfile(source.parent / 'vermeer/0062-vermeer-live-sample.patch',
+                    target / '0062-vermeer-live-sample.patch')
+    name = 'vermeer_sample_images.h'
+    data = (source.parent / 'vermeer' / name).read_text()
+    path = 'osfmk/kern/' + name
+    (target / '0063-vermeer-sample-images.patch').write_text(''.join(
+        difflib.unified_diff([], data.splitlines(True), fromfile='/dev/null', tofile='b/' + path)))
     # Generic graphics fixes only; no Sweet touch, PMIC, SMP or UFS drivers.
     for number in (64, 68):
         patch = next(source.glob(f'{number:04d}-*.patch'))

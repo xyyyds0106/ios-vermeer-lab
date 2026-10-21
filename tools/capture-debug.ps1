@@ -2,7 +2,7 @@ param(
     [ValidateRange(1,86400)][int]$Seconds = 600,
     [string]$Port,
     [string]$LogPath = (Join-Path $PSScriptRoot '..\..\device-audit\live-ios-004.log'),
-    [ValidateSet('help','status','ping','replay')][string]$Command = 'status',
+    [ValidateSet('help','status','ping','replay','sample')][string]$Command = 'status',
     [switch]$ListOnly
 )
 $ErrorActionPreference = 'Stop'

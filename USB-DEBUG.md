@@ -24,8 +24,21 @@ Commands, each followed by a newline:
 - `ping`: build-tag response
 - `status`: event/byte counters and dropped console bytes
 - `replay`: replay the retained RAM log
+- `sample`: queue a read-only snapshot of the GUI sampler's boot-selected
+  processes, or report unavailable if disabled/the40-snapshot limit is reached
 
-No shell, memory access, storage operations or reboot commands are exposed.
+The GUI007 sampler records saved user thread stacks and bounded dyld64 private
+image paths/bases, allowing migration-plugin addresses to be symbolicated.
+Work runs on a separate sampler thread. Requests coalesce and snapshots are at
+least10seconds apart; the timer starts at90seconds, then every120seconds.
+`sweetsample=-` disables it. Names use the kernel's16-character process name.
+The host cannot supply addresses, task names or read sizes. Image enumeration
+uses fault-safe reads, at most4096entries/64private rows and159path bytes per
+row; a changing image list is marked best effort. The shared cache uses its
+separately recorded slide. Stack lines are split into four-frame chunks so the
+console formatter retains line boundaries. GUI007 hardware validation is pending.
+
+No shell, arbitrary memory access, storage operations or reboot commands are exposed.
 This is log transport and bounded queries, not an interactive kernel debugger.
 After a cable disconnect, configured bus reset, overflow or DMA/endpoint error,
 the interface stops and retains all DMA memory. Reboot the temporary kernel to
