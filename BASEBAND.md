@@ -7,8 +7,8 @@ are separate work; call audio and IMS remain dependencies of usable voice calls.
 
 ## Current result
 
-This is a protocol/inventory foundation and a prepared read-only hardware
-diagnostic, not an operational modem driver. No SIM, registration, data session,
+This is a protocol/inventory foundation with a first hardware diagnostic result
+and a revised candidate, not an operational modem driver. No SIM, registration, data session,
 roaming transition, voice call or IMS registration is demonstrated on this XNU
 build. No cellular service is advertised to iOS. The existing GUI kernel does
 not compile these headers into a live modem transport.
@@ -72,30 +72,46 @@ does not prove a particular missing IOKit selector, nor that suppressing the
 crash would produce a modem. The local report is
 `device-audit/commcenter-011-crash-symbols.txt`. No Apple binary was modified.
 
-## Prepared hardware diagnostic
+## Hardware diagnostic012 result and candidate013
 
 The sibling local `k70-probe` directory contains `baseband_state.c`,
-`baseband_entry.S`, `baseband_guard.h`, `tests/baseband_guard_test.c` and
+`baseband_entry.S`, `baseband_guard.h`, `baseband_metadata.h`, host tests and
 `build_baseband.sh`. The build reuses its existing exception vectors, linker
-script and Android v4 packager. Its enlarged BSS uses page-relative entry
-references for the private 2 MiB snapshot.
+script and Android v4 packager. Entry references are page-relative.
 
 `k70-probe-012-baseband.img` first checks EL1, disabled MMU/data cache,
 page-aligned image placement and the live FDT's exact SMEM range, phandle,
-consumer and modem-compatible properties. It copies SMEM into its own image
-memory and displays parser status, partition/item sizes and retained GLINK
-head/tail values. An access exception stops the probe and displays diagnostics.
+consumer and modem-compatible properties. Temporary boot succeeded, and the
+user's photograph confirms execution and live-FDT result0. Its bulk copy
+stopped with vector4, ESR0x96000010, FAR/last-read0x81db1000 (offset0xb1000).
+This is a same-EL read Data Abort with DFSC0x10, synchronous external abort;
+the specific hardware/protection cause remains unknown. The parser was not
+reached. The DT reservation does not prove every byte is readable. Original
+image, photograph and structured result are retained in private device-audit.
+
+Candidate013 replaces the bulk copy with a bounded metadata reader: the TOC
+header and exactly its validated entry count, followed by only the unique
+APSS(0)/MPSS(1) partition's 32-byte header. It checks ranges, overlaps, host
+pair, matching partition size and free-space bounds. Directory and header
+rereads reject changes, without claiming hardware locking. It reports the
+directory entry containing the prior fault address, if present. A strict
+phase-specific allowlist and separate exclusion of the observed fault's 4KiB
+page govern every read. Other pages are not assumed accessible; an exception
+stops all further reads and shows the phase, ESR and FAR. It never recovers
+past an external abort. Item/descriptor/FIFO payloads are not read.
 The only intended writes are its own image/stack and the known framebuffer;
 PSCI resets the device after 90 seconds. It performs no modem register writes,
 mailbox traffic, QMI commands, firmware loading or storage operations.
 
-The snapshot cannot demonstrate a live modem or any cellular capability.
-Missing allocations may mean the AP transport has not created them. Existing
-allocations/counters may be stale. Return 3 means cached allocations were not
-walked. An invalid snapshot requires inspection rather than an assumed layout.
-The image is prepared locally and has not been booted. A fresh human Fastboot
-confirmation is needed before temporary boot; the last retained device state
-is GUI011 and must not be treated as a current Fastboot observation.
+Metadata cannot demonstrate a live modem or any cellular capability. Missing
+APSS/MPSS entries are reported explicitly, without a fallback to other hosts
+or the global partition. Existing metadata may be stale. Candidate013 returns
+0=metadata valid,1=invalid,2=no pair,3=read refused,4=changed,5=reader failure;
+a hardware abort instead uses the stop screen. The older offline full-snapshot
+decoder retains its separate return codes and is not used for hardware reads.
+Candidate013 is not yet device-tested. The user supplied another temporary-boot
+confirmation, not yet consumed; device operations are coordinated with the
+GPU/touch lane so they must not race each other.
 
 ## Validation and continuation
 
@@ -103,7 +119,10 @@ Local ASan/UBSan checks pass for QRTR/QMI (100,000 malformed inputs), SMEM
 (100,000 mutations) and the live-FDT guard (100,000 mutations plus the saved
 handset FDT). Four Python inventory tests include 3,000 mutations and every
 truncation of a synthetic tree. A freestanding ARM64 include check passes;
-the bare-metal diagnostic compiles and links. Existing GUI profile isolation
+the bare-metal diagnostic compiles and links. Metadata-specific tests cover
+host ownership, duplicate/overlapping/overflowed entries, the observed fault
+page (including crossing it), read refusals, changing metadata, injected failures
+at each read phase, and 100,000 mutations. Existing GUI profile isolation
 also passes. None of these results establishes electrical/radio operation.
 
 After the diagnostic, implement and validate MPSS lifecycle plus SMEM/IPCC/
@@ -127,6 +146,7 @@ Source inspection used MiCode commit
 
 - [MPSS PAS lifecycle](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/remoteproc/qcom_q6v5_pas.c)
 - [SMEM](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/soc/qcom/smem.c), [GLINK SMEM](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/rpmsg/qcom_glink_smem.c)
+- [ARM64 ESR bit definitions](https://github.com/torvalds/linux/blob/master/arch/arm64/include/asm/esr.h) used to decode the diagnostic012 fault; they do not identify its board-specific cause.
 - [QRTR](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/net/qrtr/qrtr.c), [QMI header](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/include/linux/soc/qcom/qmi.h)
 
 Service/message numbers were cross-checked against libqmi's
