@@ -11,6 +11,22 @@
 #include <sys/types.h>
 #endif
 #define VFRAME_LAYERS 4
+/* Monotonic nanoseconds, independent of timer callback count. hz=0 keeps
+ * the existing unthrottled (60 Hz) request. Budget at least the configured
+ * interval and twice the last copy cost so slow CPU copies retain headroom.
+ */
+static inline uint64_t vframe_interval_ns(uint32_t hz)
+{
+    if(!hz || hz>60)hz=60;
+    return (1000000000ULL+hz-1)/hz;
+}
+static inline uint64_t vframe_next_ns(uint64_t now,uint64_t copy_ns,uint64_t interval)
+{
+    const uint64_t limit=~(uint64_t)0;
+    uint64_t budget=copy_ns>limit/2?limit:copy_ns*2;
+    if(budget<interval)budget=interval;
+    return budget>limit-now?limit:now+budget;
+}
 struct vframe_refs { void *slot[VFRAME_LAYERS]; };
 static inline void vframe_take(struct vframe_refs *pending,struct vframe_refs *out)
 {

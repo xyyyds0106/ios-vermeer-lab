@@ -26,7 +26,7 @@ static inline int vrw_proof_valid(unsigned p)
 #define VRW_TRIGGER UINT32_C(0x1000000)
 enum { VRW_OK=0,VRW_GATED,VRW_ARGUMENT,VRW_REUSED,VRW_REVOKED,VRW_CLOCK,
        VRW_TIMEOUT,VRW_IO,VRW_CONFLICT,VRW_NO_SLOT,VRW_LAYOUT,VRW_VERIFY };
-enum { VRW_NEW=0,VRW_PREFLIGHT,VRW_SELECT,VRW_MASK,VRW_PROGRAM,VRW_FIRE,
+enum { VRW_NEW=0,VRW_PREFLIGHT,VRW_SELECT,VRW_ARM_IRQ,VRW_PROGRAM,VRW_FIRE,
        VRW_WAIT,VRW_CLEANUP,VRW_DONE,VRW_STOPPED,VRW_SETTLE };
 struct vrw_io {
     void *ctx;
@@ -46,10 +46,13 @@ struct vrw_state {
     unsigned ncpt,first,stride,msg;
     uint32_t addresses[2],irq_original,command_status[3];
     uint32_t last_offset,last_value,reads,writes;
+    unsigned failure_phase,last_read_valid;
+    uint32_t last_read_value,last_irq,last_idle;
     uint64_t epoch,last,deadline;
 };
 static inline int vrw_fail(struct vrw_state *s,unsigned status)
-{ s->status=status;s->phase=VRW_STOPPED;return 0; }
+{ if(s->phase!=VRW_STOPPED)s->failure_phase=s->phase;
+  s->status=status;s->phase=VRW_STOPPED;return 0; }
 static inline int vrw_ready(struct vrw_state *s,const struct vrw_io *io)
 {
     if(!vrw_proof_valid(io->proof(io->ctx)) || io->epoch(io->ctx)!=s->epoch)
@@ -64,9 +67,10 @@ static inline int vrw_read(struct vrw_state *s,const struct vrw_io *io,uint32_t 
 {
     if((off&3u) || off>VRP_RSC_BYTES-4)return vrw_fail(s,VRW_ARGUMENT);
     if(!vrw_ready(s,io))return 0;
-    ++s->reads;s->last_offset=off;
+    ++s->reads;s->last_offset=off;s->last_read_valid=0;
     uint32_t value=0;
     if(io->read32(io->ctx,off,&value)!=1)return vrw_fail(s,VRW_IO);
+    s->last_read_value=value;s->last_read_valid=1;
     if(!vrw_ready(s,io))return 0;
     *v=value;return 1;
 }
@@ -95,7 +99,7 @@ static inline int vrw_write(struct vrw_state *s,const struct vrw_io *io,uint32_t
     if(!vrw_ready(s,io))return 0;
     /* Failed write is potentially applied. Never roll back or release its
      * mapping/slot on uncertainty; caller retains the lease until reboot. */
-    s->poisoned=s->touched=1;s->last_offset=off;s->last_value=value;++s->writes;
+    s->poisoned=s->touched=1;s->last_offset=off;s->last_value=value;s->last_read_valid=0;++s->writes;
     if(io->write32(io->ctx,off,value)!=1)return vrw_fail(s,VRW_IO);
     return vrw_ready(s,io);
 }
@@ -139,8 +143,13 @@ static inline int vrw_rail(struct vrw_state *s,const struct vrw_io *io)
         return vrw_fail(s,s->status?s->status:VRW_LAYOUT);
     if(!vrw_empty(s,io,s->selected,&empty))return 0;
     if(!empty)return vrw_fail(s,VRW_CONFLICT);
-    s->phase=VRW_MASK;
-    if(!vrw_sync(s,io,0xd00,s->irq_original&~bit))return 0;
+    s->phase=VRW_ARM_IRQ;
+    /* ACTIVE TCS completion is enabled at the RSC while the platform owner
+     * keeps the GIC interrupt disabled. Poll the latched completion here;
+     * masking it at the RSC and then requiring IRQ_STATUS can never finish
+     * on hardware that gates that status with IRQ_ENABLE. Restore on success.
+     */
+    if(!vrw_sync(s,io,0xd00,s->irq_original|bit))return 0;
     if(!vrw_empty(s,io,s->selected,&empty))return 0;
     if(!empty)return vrw_fail(s,VRW_CONFLICT);
     s->phase=VRW_PROGRAM;
@@ -159,6 +168,7 @@ static inline int vrw_rail(struct vrw_state *s,const struct vrw_io *io)
     for(unsigned i=0;i<100000;i++) {
         uint32_t irq,idle;
         if(!vrw_read(s,io,0xd04,&irq) || !vrw_read(s,io,b+s->first+8,&idle))return 0;
+        s->last_irq=irq;s->last_idle=idle;
         if(irq==UINT32_MAX || idle==UINT32_MAX)return vrw_fail(s,VRW_IO);
         unsigned complete=1;
         for(unsigned c=0;c<3;c++) {

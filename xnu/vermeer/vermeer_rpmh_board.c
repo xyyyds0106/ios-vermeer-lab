@@ -206,6 +206,14 @@ static int vrb_touch_acquire(void *ctx)
     if(result!=VRW_OK) {
         printf("VERMEER RPMH: stopped status=%u phase=%u rails=%u retained=%u\n",result,
             vrb.touch.executor.phase,vrb.touch.executor.completed_rails,os_atomic_load(&vrb.retired,relaxed));
+        const struct vrw_state *s=&vrb.touch.executor;
+        /* Retained RAM only: never probe a failed/quarantined controller. */
+        printf("VERMEER RPMH: failed-phase=%u rail=%u tcs=%u reads=%u writes=%u offset=%08x read-valid=%u read=%08x write=%08x\n",
+            s->failure_phase,s->rail,s->selected,s->reads,s->writes,s->last_offset,
+            s->last_read_valid,s->last_read_value,s->last_value);
+        printf("VERMEER RPMH: irq=%08x idle=%08x cmd=%08x/%08x/%08x elapsed-deadline=%llu/%llu\n",
+            s->last_irq,s->last_idle,s->command_status[0],s->command_status[1],s->command_status[2],
+            (unsigned long long)s->last,(unsigned long long)s->deadline);
         return 0;
     }
     if(!vrb_proof(NULL))goto failed;

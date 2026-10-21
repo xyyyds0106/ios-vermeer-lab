@@ -34,7 +34,8 @@ static void wait_us(void *p,unsigned n)
     if(n>1 && f.late_settle)f.now+=300000;
     if(f.delayed && f.pending_tcs<3 && f.now>=f.ready_at) {
         unsigned b=0xd00+f.pending_tcs*0x2a0;
-        f.r[0xd04/4]|=1u<<f.pending_tcs;f.r[(b+first()+8)/4]=1;
+        if(!f.noirq && (f.r[0xd00/4]&(1u<<f.pending_tcs)))f.r[0xd04/4]|=1u<<f.pending_tcs;
+        f.r[(b+first()+8)/4]=1;
         for(unsigned c=0;c<3;c++)f.r[(b+msg()+12+c*stride())/4]=0x10100;
         f.pending_tcs=99;
     }
@@ -72,7 +73,7 @@ static int wr(void *p,uint32_t off,uint32_t value)
             assert(f.r[(cmd+8)/4]==(c==0?(rail==0?1800u:3200u):(c==1?7u:1u)));
             f.r[(cmd+12)/4]=f.allones?UINT32_MAX:(f.incomplete?0x100u:0x10100u);
         }
-        if(!f.noirq)f.r[0xd04/4]|=1u<<t;
+        if(!f.noirq && (f.r[0xd00/4]&(1u<<t)))f.r[0xd04/4]|=1u<<t;
         f.r[(b+first()+8)/4]=f.noidle?0:1;
         if(f.delayed) {
             f.pending_tcs=t;f.ready_at=f.now+50;f.r[0xd04/4]&=~(1u<<t);f.r[(b+first()+8)/4]=0;
@@ -151,6 +152,8 @@ static void healthy(void)
     assert(run(&s)==VRW_OK && s.executor.selected==1);
     for(unsigned i=0;i<f.writes;i++)assert(f.write_off[i]==0xd00 || f.write_off[i]==0xd08 || f.write_off[i]>=0xd00+0x2a0);
     reset(0x300);f.delayed=1;assert(run(&s)==VRW_OK && f.triggered==2);
+    reset(0x300);f.r[0xd00/4]=0;
+    assert(run(&s)==VRW_OK && f.triggered==2 && f.r[0xd00/4]==0);
 }
 static void guards(void)
 {
@@ -201,6 +204,7 @@ static void failures(void)
         reset(0x300);
         if(fail==0)f.noirq=1;else if(fail==1)f.incomplete=1;else if(fail==2)f.noidle=1;else f.allones=1;
         assert(run(&s)==VRW_TIMEOUT && f.triggered==1 && s.executor.completed_rails==0);
+        assert(s.executor.failure_phase==VRW_WAIT && s.executor.last_read_valid);
         assert(s.executor.poisoned && f.finish_mode==VRW_QUARANTINE);
         for(unsigned i=0;i<f.writes;i++)assert(f.write_off[i]!=0xd08); /* no false cleanup */
     }

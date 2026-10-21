@@ -159,6 +159,8 @@ if gui:
     generated += (source.parent / 'vermeer/0069-vermeer-rpmh-hook.patch').read_text()
     generated += (source.parent / 'vermeer/vermeer_rpmh_pm_hook.patch').read_text()
     (target / '0069-vermeer-rpmh.patch').write_text(generated)
+    shutil.copyfile(source.parent / 'vermeer/0070-vermeer-interactive-present.patch',
+                    target / '0070-vermeer-interactive-present.patch')
     # Generic graphics fixes only; no Sweet touch, PMIC, SMP or UFS drivers.
     for number in (64, 68):
         patch = next(source.glob(f'{number:04d}-*.patch'))

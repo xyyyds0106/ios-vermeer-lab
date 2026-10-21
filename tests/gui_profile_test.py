@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as folder:
     all_patches=''.join(p.read_text(errors='surrogateescape') for p in profile.glob('*.patch'))
     assert '+++ b/bsd/dev/sweet_ufs.c' not in all_patches
     assert 'SWEETLOG' not in all_patches
-    for name in ('0046-','0050-','0058-','0059-','0060-','0061-','0062-','0063-','0064-','0065-','0066-','0067-','0068-','0069-'):
+    for name in ('0046-','0050-','0058-','0059-','0060-','0061-','0062-','0063-','0064-','0065-','0066-','0067-','0068-','0069-','0070-'):
         assert any(p.name.startswith(name) for p in profile.iterdir())
     assert '+++ b/bsd/dev/vermeer_touch.c' in all_patches
     for name in ('vermeer_geni_dma.h','vermeer_touch_route.h','vermeer_gpi.h','vermeer_gpi_transport.h',

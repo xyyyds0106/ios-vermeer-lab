@@ -1,0 +1,126 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -102,7 +102,7 @@
+ 	struct vframe_refs fPendingRefs; /* owning refs, transferred with the record */
+ 	uint8_t       fPending[SWEET_FB_SWAP_REC_SIZE];     /* latest swap, not yet shown */
+ 	bool          fDirty;
+-	uint32_t      fFlushTicks;    /* vsync ticks between panel copies */
++	uint64_t      fIntervalNs, fNextFlushNs; /* monotonic copy budget */
+ 
+ 	bool start(IOService *provider) APPLE_KEXT_OVERRIDE;
+ 	void addClient(IOMobileFramebufferUserClient *client);
+@@ -137,12 +137,17 @@
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
+ static uint64_t _Atomic vf_submitted, vf_presented, vf_bytes, vf_missing, vf_rejected, vf_ticks;
++static uint64_t _Atomic vf_copy_ns, vf_copy_max_ns, vf_coalesced, vf_last_submit_ns, vf_last_present_ns;
+ static void vermeer_frame_status(void)
+ {
+     IOLog("VERMEER FRAME: submits=%llu presents=%llu ticks=%llu backend=cpu-copy gpu=unavailable\n",
+         os_atomic_load(&vf_submitted,relaxed),os_atomic_load(&vf_presented,relaxed),os_atomic_load(&vf_ticks,relaxed));
+     IOLog("VERMEER FRAME: copied-bytes=%llu missing=%llu rejected=%llu\n",
+         os_atomic_load(&vf_bytes,relaxed),os_atomic_load(&vf_missing,relaxed),os_atomic_load(&vf_rejected,relaxed));
++    IOLog("VERMEER FRAME: adaptive copy-ns=%llu max-ns=%llu coalesced=%llu last-submit-ns=%llu last-present-ns=%llu\n",
++        os_atomic_load(&vf_copy_ns,relaxed),os_atomic_load(&vf_copy_max_ns,relaxed),
++        os_atomic_load(&vf_coalesced,relaxed),os_atomic_load(&vf_last_submit_ns,relaxed),
++        os_atomic_load(&vf_last_present_ns,relaxed));
+ }
+ static void vermeer_frame_release(struct vframe_refs *refs)
+ {
+@@ -196,9 +201,10 @@
+ 		IOLog("SWEET FB: no vsync timer\n");
+ 		return false;
+ 	}
+-	uint32_t hz = 10;
++	uint32_t hz = 20;
+ 	PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
+-	fFlushTicks = (hz == 0 || hz >= 60) ? 1 : 60 / hz;
++	fIntervalNs = vframe_interval_ns(hz);
++	fNextFlushNs = 0;
+ 	fVsync->setTimeoutUS(SWEET_FB_VSYNC_US);
+ 
+ 	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
+@@ -206,7 +212,7 @@
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
+ 	registerService();
+ 	vermeer_debug_frame_register(vermeer_frame_status);
+-	IOLog("VERMEER FB: retained pending frame ownership enabled\n");
++	IOLog("VERMEER FB: retained pending frame ownership enabled; adaptive present hz=%u\n", hz);
+ 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id);
+ 	IOLog("VERMEER FB: logical canvas 1125x2436 centered in 1440x3200\n");
+@@ -218,6 +224,8 @@
+ {
+ 	AppleCLCD *fb = (AppleCLCD *)owner;
+ 	uint64_t now = mach_absolute_time();
++	uint64_t startedNs;
++	absolutetime_to_nanoseconds(now, &startedNs);
+ 	uint64_t count = ++fb->fVsyncCount;
+ 	os_atomic_inc(&vf_ticks,relaxed);
+ 	uint64_t values[6] = {
+@@ -232,24 +240,31 @@
+ 		    (IOMobileFramebufferUserClient *)fb->fClients->getObject(i);
+ 		client->notify(SWEET_FB_NOTIFY_VSYNC, values, 6);
+ 	}
+-	bool flush = fb->fDirty && (count % fb->fFlushTicks) == 0;
+-	uint8_t *rec = NULL;
+-	struct vframe_refs refs = {};
+-	if (flush) {
+-		rec = (uint8_t *)IOMallocData(SWEET_FB_SWAP_REC_SIZE);
+-		if (rec != NULL) {
+-			memcpy(rec, fb->fPending, SWEET_FB_SWAP_REC_SIZE);
+-			vframe_take(&fb->fPendingRefs,&refs);
+-			fb->fDirty = false;
+-		}
+-	}
+-	IOLockUnlock(fb->fLock);
+-	if (rec != NULL) {
+-		fb->present(rec,&refs);
+-		vermeer_frame_release(&refs);
+-		IOFreeData(rec, SWEET_FB_SWAP_REC_SIZE);
+-	}
+-	sender->setTimeoutUS(SWEET_FB_VSYNC_US);
++	bool flush = fb->fDirty && startedNs >= fb->fNextFlushNs;
++    uint8_t rec[SWEET_FB_SWAP_REC_SIZE];
++    struct vframe_refs refs = {};
++    if (flush) {
++        memcpy(rec, fb->fPending, sizeof(rec));
++        vframe_take(&fb->fPendingRefs, &refs);
++        fb->fDirty = false;
++    }
++    IOLockUnlock(fb->fLock);
++    if (flush) {
++        uint64_t copyStart = mach_absolute_time(), copyNs;
++        fb->present(rec, &refs);
++        vermeer_frame_release(&refs);
++        absolutetime_to_nanoseconds(mach_absolute_time() - copyStart, &copyNs);
++        os_atomic_add(&vf_copy_ns, copyNs, relaxed);
++        if (copyNs > os_atomic_load(&vf_copy_max_ns, relaxed))
++            os_atomic_store(&vf_copy_max_ns, copyNs, relaxed);
++        os_atomic_store(&vf_last_present_ns, startedNs, relaxed);
++        fb->fNextFlushNs = vframe_next_ns(startedNs, copyNs, fb->fIntervalNs);
++    }
++    /* Copy time is part of this tick's budget, not extra timer drift. */
++    uint64_t elapsedNs;
++    absolutetime_to_nanoseconds(mach_absolute_time() - now, &elapsedNs);
++    const uint64_t periodNs = SWEET_FB_VSYNC_US * 1000ULL;
++    sender->setTimeoutUS(elapsedNs >= periodNs ? 1 : (periodNs - elapsedNs + 999) / 1000);
+ }
+ 
+ void
+@@ -300,11 +315,15 @@
+     }
+ 	IOLockLock(fLock);
+     vframe_replace(&fPendingRefs,&incoming,&displaced);
++    if (fDirty) os_atomic_inc(&vf_coalesced, relaxed);
+ 	memcpy(fPending, rec, SWEET_FB_SWAP_REC_SIZE);
+ 	fDirty = true;
+ 	IOLockUnlock(fLock);
+     vermeer_frame_release(&displaced);
+     os_atomic_inc(&vf_submitted,relaxed);
++    uint64_t submitNs;
++    absolutetime_to_nanoseconds(mach_absolute_time(), &submitNs);
++    os_atomic_store(&vf_last_submit_ns, submitNs, relaxed);
+ 	if ((++sweet_fb_swap_count % 1000) == 0) {
+ 		IOLog("SWEET FB: %llu swaps\n", sweet_fb_swap_count);
+ 	}

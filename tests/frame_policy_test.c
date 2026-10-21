@@ -12,6 +12,27 @@ static void release(struct vframe_refs *r)
 }
 int main(void)
 {
+    assert(vframe_interval_ns(5)==200000000);
+    assert(vframe_interval_ns(20)==50000000);
+    assert(vframe_interval_ns(45)==22222223);
+    assert(vframe_interval_ns(0)==16666667 && vframe_interval_ns(UINT_MAX)==16666667);
+    assert(vframe_next_ns(100,1000000,vframe_interval_ns(20))==50000100);
+    assert(vframe_next_ns(100,40000000,vframe_interval_ns(20))==80000100);
+    assert(vframe_next_ns(UINT64_MAX-10,1,50)==UINT64_MAX);
+    assert(vframe_next_ns(100,UINT64_MAX,50)==UINT64_MAX);
+    /* Continuous producers: 60 Hz notifications must not force 60 expensive
+     * panel copies; a slow copy lowers the copy rate without dropping refs. */
+    for(unsigned slow=0;slow<2;slow++) {
+        uint64_t due=0;unsigned copies=0;
+        for(unsigned tick=0;tick<120;tick++) {
+            uint64_t now=(uint64_t)tick*16666667;
+            if(now>=due) {
+                ++copies;
+                due=vframe_next_ns(now,slow?40000000:1000000,vframe_interval_ns(20));
+            }
+        }
+        assert(copies==(slow?24u:40u));
+    }
     struct surface a={1},b={1};
     struct vframe_refs pending={0},incoming={0},old={0},presenting={0};
     incoming.slot[0]=&a;++a.refs;vframe_replace(&pending,&incoming,&old);release(&old);

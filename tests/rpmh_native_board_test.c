@@ -111,7 +111,7 @@ static void model_store(vm_offset_t va,uint64_t pa,uint32_t value)
             assert(hw.rsc[(at+8)/4]==(c==0?(rail?3200u:1800u):(c==1?7u:1u)));
             hw.rsc[(at+12)/4]=0x10100;
         }
-        if(!hw.noirq)hw.rsc[0xd04/4]|=1u<<t;
+        if(!hw.noirq && (hw.rsc[0xd00/4]&(1u<<t)))hw.rsc[0xd04/4]|=1u<<t;
         hw.rsc[(b+first()+8)/4]=1;
     }
 }
