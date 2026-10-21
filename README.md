@@ -2,15 +2,25 @@
 
 Private experiment for Redmi K70 (vermeer / SM8550).
 
-Integrated GUI005 (`bc2a4bc`, Actions39542363383) temporarily boots on the K70.
+Integrated GUI006 (`c6fadce`, Actions39544696722) temporarily boots on the K70
+and passes first presentation: backboardd alternates two 1125x2436 BGRA
+surfaces on the guarded 1440x3200 panel, with more than 8,000 submitted swaps
+and continued USB logs in the initial four-minute observation. SpringBoard
+and backboardd each start once with no captured crash; CommCenter still
+crashes. The user confirms an Apple logo and progress bar on the panel;
+Setup/Hello and the home screen have not yet been observed. USB close/reopen,
+ping/help/status and retained-log replay pass after more than six minutes.
+Physical touch input is not implemented. The existing UFS root was retained;
+no partition was flashed for this test.
+
+Earlier integrated GUI005 (`bc2a4bc`, Actions39542363383) temporarily boots on the K70.
 The framebuffer geometry guard passes, and backboardd opens the display,
 IOSurface and HID services and creates a 1440x3200 BGRA surface. SpringBoard
 and backboardd each start once without a captured crash, but logs then stop
-before a confirmed frame presentation. No iOS GUI is proven. The next delta
+before a confirmed frame presentation. No iOS GUI was proven. The GUI006 delta
 avoids switching the read-only-late console selector on the first frame,
 preserves USB logging and panic text, uses a centered 1125x2436 UIKit canvas,
-and adds work-interval and cached-IOSurface lookup compatibility. Physical
-touch input is not implemented.
+and adds work-interval and cached-IOSurface lookup compatibility.
 
 Earlier integrated003 evidence: official launchd passes FIPS/keybag boot
 tasks and repeatedly starts SpringBoard/backboardd and multiple Apple daemons.
