@@ -37,6 +37,36 @@ Important differences established by reading actual source:
   ownership must come from the K70 hardware contract. Matching the GPU model
   does not establish context-bank ownership or electrical readiness.
 
+## Compile compatibility checked
+
+Eighteen selected, unmodified upstream translation units passed syntax checking
+with the retained K70 XNU kernel's actual ARM64/16KB build configuration:
+
+- NativeAdreno board parsing, backing memory, CPU/cache operations, SMMU memory
+  visibility and GPU virtual-memory management (five C++ files).
+- ArmSmmu4K tables, audit, context, live mappings, MMIO binding, programming,
+  streams and table memory (eight C files).
+- AdrenoFirmware planning plus HFI, HFI startup and votes (four C files).
+- AdrenoPM4 packet encoding (one C file).
+
+This establishes a useful source/API reuse baseline. It is not a linked driver,
+an exercised 16KB allocation/cache path, a firmware upload or a GPU test.
+In particular, the unmodified CPU guard still refuses this kernel's page size.
+Host test programs are separate from these kernel translation units; attempting
+to compile a host test against kernel headers is not an ABI compatibility test.
+
+The page-size port must retain requested GPU buffer lengths separately from
+CPU-owned allocation extents. The latter require whole 16KB ownership before
+changing cache attributes; GPU mappings and table pages remain 4KB. Pool splits,
+imported user ranges, cache-attribute restoration and user mapping teardown all
+need the same ownership rule. Padding cannot silently become a GPU-accessible
+part of a neighbouring allocation.
+
+The sheng board code also uses a different GMU register-window origin from the
+saved K70 tree. Resolve named register ranges and register-offset bases before
+reusing its generated GMU setup; identical silicon does not make those two
+window-relative address calculations interchangeable.
+
 Read-only parsing of the previously saved K70 DT confirms GPU MMIO at0x3d00000,
 the GMU window at0x3d68000, and a separate GPU SMMU at0x3da0000. These are not
 the0x15000000 application SMMU used by the current UFS/USB path. No GPU MMIO,
@@ -53,6 +83,13 @@ contract: wrapper1 core2x/core clock votes were missing from the initial K70
 physical-touch candidate. Their offsets/bits were cross-checked against pinned
 MiCode Kalama clock source. The touch repair also follows its HWCG readiness
 rules. These changes do not claim GPU hardware initialization.
+
+The subsequent K70 temporary boot passed that clock preflight and identified SPI
+firmware with the FIFO interface disabled. Physical input therefore still needs
+the GENI internal-DMA transport and the verified K70 power/reset sequence. The
+driver stopped before a touch transaction; it did not turn that into an input
+success. The upstream sheng probe's SMMU-bypass operation is also not a substitute
+for establishing ownership of this board's DMA stream/context.
 
 Upstream code is retained privately for review. Any vendored source will retain
 its component license; NativeAdreno/NativeMetal/ArmSmmu4K use MIT and several
