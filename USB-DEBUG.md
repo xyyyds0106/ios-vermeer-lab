@@ -6,6 +6,8 @@ Actions39540409885) enumerated with Windows Usbser as COM6, streamed early
 kernel and Apple-service crash logs, and answered `status` through bulk OUT/IN.
 No USB errors appeared during that capture. This does not establish iOS GUI,
 panic-time transport or reconnect support after a physical disconnect.
+The initial capture saved108,604bytes; a subsequent close/reopen test passed
+`ping`, `help`, `status` and retained early-log `replay` on the same boot.
 
 Boot with `vermeer_usb=1`. The default and diagnostic profiles do not start USB.
 Windows uses its built-in Usbser driver for CDC ACM (class02/subclass02).
