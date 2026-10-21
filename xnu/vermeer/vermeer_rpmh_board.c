@@ -183,6 +183,14 @@ static void vrb_gpu_db_probe(void)
     unsigned status=AdrenoCmdDbParse(vrb_gpu_db_copy,sizeof(vrb_gpu_db_copy),1,&vrb_gpu_db);
     printf("VERMEER GPU DB: status=%u complete=%u rows=%u entries=%u found=%02x stable-two-pass=1 gpu-enabled=0\n",
         status,vrb_gpu_db.complete,vrb_gpu_db.rows,vrb_gpu_db.entries,vrb_gpu_db.found_mask);
+    if(status!=AdrenoCmdDbOK)for(unsigned i=0;i<8;i++) {
+        /* Bounded retained-RAM diagnostics, including empty directory rows.
+         * A parse rejection never causes additional controller/DB MMIO. */
+        const uint8_t *p=vrb_gpu_db_copy+8+16*i;uint16_t field[5];
+        for(unsigned k=0;k<5;k++)field[k]=(uint16_t)p[2*k]|(uint16_t)p[2*k+1]<<8;
+        printf("VERMEER GPU DB ROW: index=%u type=%u entries=%u entry-offset=%u aux-offset=%u version=%04x\n",
+            i,field[0],field[3],field[1],field[2],field[4]);
+    }
     if(!vrb_gpu_db.complete)return;
     for(unsigned i=0;i<AdrenoCmdDbResources;i++)if(vrb_gpu_db.found_mask&(1u<<i)) {
         const struct AdrenoCmdDbResource *r=&vrb_gpu_db.resource[i];uint32_t words[8]={0};

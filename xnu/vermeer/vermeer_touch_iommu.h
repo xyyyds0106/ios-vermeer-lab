@@ -20,12 +20,12 @@ struct vti_ops {
 enum {VTI_OK,VTI_ARGUMENT,VTI_LEASE,VTI_IO,VTI_LAYOUT,VTI_BUSY,VTI_TABLES,VTI_TIMEOUT,VTI_READBACK};
 enum {VTI_CONFLICT_NONE,VTI_CONFLICT_SID_ALIAS,VTI_CONFLICT_FOREIGN_SID,
       VTI_CONFLICT_NO_SLOT,VTI_CONFLICT_NO_BANK,VTI_CONFLICT_NO_ASID,
-      VTI_CONFLICT_SMR_CHANGED,VTI_CONFLICT_S2CR_CHANGED};
+      VTI_CONFLICT_SMR_CHANGED,VTI_CONFLICT_S2CR_CHANGED,VTI_CONFLICT_BANK_CHANGED};
 struct vti {
     struct vti_ops io;uint64_t physical[5],table_pa;void *table_cpu;
     ArmSmmu4KConfig config;ArmSmmu4KResult tables;ArmSmmu4KContextConfig context;
     ArmSmmu4KContextImage image;
-    unsigned slot,bank,asid,error,touched,attached,retired;uint32_t old_smr,old_s2cr;
+    unsigned slot,bank,asid,error,touched,attached,retired;uint32_t old_smr,old_s2cr,bank_control,bank_actlr;
     uint64_t begin,last;
     /* Retained observations only; printing failures never adds device I/O. */
     unsigned scan_phase,scan_index,conflict,valid_routes,enabled_banks,reserved_banks,unsafe_actlr_banks;
@@ -100,7 +100,10 @@ static inline int vti_prepare(struct vti *v)
             asid=(unsigned)(ttbr>>48);if(asid<256)taken_asid[asid]=1;
         } else if(!used[i]) {
             if(!vti_rd(v,0x80004+4096*i,&actlr))return 0;
-            if(!actlr)v->bank=i; /* only generic/reset ACTLR; no guessed Qualcomm quirks */
+            /* MMU-500 reset ACTLR bits 0/1 are compatible. The vendor Linux
+             * arm_mmu500_reset clears only CPRE (bit 1) for errata 841119 and
+             * 826419. Unknown Qualcomm configuration remains ineligible. */
+            if(!(actlr&~3u)){v->bank=i;v->bank_control=control;v->bank_actlr=actlr;}
             else {
                 if(!v->unsafe_actlr_banks){v->first_unsafe_bank=i;v->first_unsafe_actlr=actlr;}
                 ++v->unsafe_actlr_banks;
@@ -139,13 +142,20 @@ static inline int vti_prepare(struct vti *v)
     if(value!=v->old_smr)return vti_busy(v,VTI_CONFLICT_SMR_CHANGED);
     if(!vti_rd(v,0xc00+4*v->slot,&value))return 0;
     if(value!=v->old_s2cr)return vti_busy(v,VTI_CONFLICT_S2CR_CHANGED);
+    unsigned cb=0x80000+v->bank*4096;
+    if(!vti_rd(v,cb,&value))return 0;
+    if(value!=v->bank_control)return vti_busy(v,VTI_CONFLICT_BANK_CHANGED);
+    if(!vti_rd(v,cb+4,&value))return 0;
+    if(value!=v->bank_actlr)return vti_busy(v,VTI_CONFLICT_BANK_CHANGED);
     v->scan_phase=6;
     /* Only SIDb6's exclusively leased slot is faulted, never another route. */
     if(!vti_wr(v,0xc00+4*v->slot,0x20000))return 0;
     if(!vti_rd(v,0xc00+4*v->slot,&value))return 0;
     if(value!=0x20000)return vti_fail(v,VTI_READBACK);
-    unsigned cb=0x80000+v->bank*4096;
-    if(!vti_wr(v,cb,0) || !vti_wr(v,0x1800+4*v->bank,v->image.cba2r) ||
+    /* This bank alone is owned. Keep bit 0; never change global cache locks
+     * or another bank. A locked ACTLR fails readback before publication. */
+    if(!vti_wr(v,cb,0) || !vti_wr(v,cb+4,v->bank_actlr&~2u) ||
+       !vti_wr(v,0x1800+4*v->bank,v->image.cba2r) ||
        !vti_wr(v,0x1000+4*v->bank,v->image.cbar) || !vti_wr(v,cb+0x10,v->image.tcr2) ||
        !vti_wr(v,cb+0x30,v->image.tcr) || !vti_w64(v,cb+0x20,v->image.ttbr0) ||
        !vti_w64(v,cb+0x28,v->image.ttbr1) || !vti_wr(v,cb+0x38,v->image.mair0) ||
@@ -159,7 +169,8 @@ static inline int vti_prepare(struct vti *v)
     }
     if(!synced)return vti_fail(v,VTI_TIMEOUT);
     const unsigned registers[][2]={{0x1800+4*v->bank,v->image.cba2r},{0x1000+4*v->bank,v->image.cbar},
-        {cb+0x10,v->image.tcr2},{cb+0x30,v->image.tcr},{cb+0x38,v->image.mair0},{cb+0x3c,0},{cb,0}};
+        {cb+4,v->bank_actlr&~2u},{cb+0x10,v->image.tcr2},{cb+0x30,v->image.tcr},
+        {cb+0x38,v->image.mair0},{cb+0x3c,0},{cb,0}};
     for(unsigned i=0;i<sizeof(registers)/sizeof(registers[0]);i++) {
         if(!vti_rd(v,registers[i][0],&value))return 0;
         /* Architectural read-as-set TBI bits do not affect the low IOVA pool. */

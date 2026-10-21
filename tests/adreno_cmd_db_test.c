@@ -24,10 +24,24 @@ static void fixture(unsigned gmxc)
     }
 }
 static unsigned parse(void){return AdrenoCmdDbParse(image,sizeof(image),1,&result);}
+static void split_arc_fixture(void)
+{
+    fixture(1);
+    /* Split ARC into independent rows, retaining row-relative aux offsets. */
+    memcpy(image+40,image+24,16);
+    p16(14,1);
+    p16(24,3);p16(26,24);p16(28,512);p16(30,3);p16(32,0x101);
+}
 int main(void)
 {
     fixture(1);assert(parse()==AdrenoCmdDbOK && result.complete && result.entries==8 && result.found_mask==255);
     assert(result.resource[AdrenoCmdDbMx].address==0x30020 && result.resource[AdrenoCmdDbCx].aux[3]==0);
+    split_arc_fixture();
+    assert(parse()==AdrenoCmdDbOK && result.complete && result.rows==3 && result.entries==8 && result.found_mask==255);
+    assert(result.resource[AdrenoCmdDbGfx].version==0x100 && result.resource[AdrenoCmdDbCx].version==0x101);
+    assert(result.resource[AdrenoCmdDbMx].address==0x30020 && result.resource[AdrenoCmdDbGmxc].aux[7]==2);
+    split_arc_fixture();memcpy(image+144+24,image+144,8);assert(parse()==AdrenoCmdDbDuplicate && !result.complete);
+    split_arc_fixture();p16(26,0);assert(parse()==AdrenoCmdDbBounds && !result.complete);
     fixture(0);assert(parse()==AdrenoCmdDbOK && result.complete && result.entries==7 && result.found_mask==0xf7);
     fixture(0);memcpy(image+144+128,"unknown",8);
     assert(parse()==AdrenoCmdDbMissing && result.complete && !(result.found_mask&(1u<<AdrenoCmdDbSh0)));
@@ -37,7 +51,7 @@ int main(void)
     fixture(1);p16(14,1025);assert(parse()==AdrenoCmdDbBounds);
     fixture(1);p16(26,0);assert(parse()==AdrenoCmdDbBounds);
     fixture(1);p16(26,65532);p16(30,1024);assert(parse()==AdrenoCmdDbBounds);
-    fixture(1);p16(24,3);assert(parse()==AdrenoCmdDbDuplicate);
+    fixture(1);p16(24,3);assert(parse()==AdrenoCmdDbUnsupported);
     fixture(1);memcpy(image+144+24,image+144,8);assert(parse()==AdrenoCmdDbDuplicate);
     fixture(1);p16(12,0);assert(parse()==AdrenoCmdDbBounds);
     fixture(1);p16(164,34);assert(parse()==AdrenoCmdDbUnsupported);
@@ -56,6 +70,6 @@ int main(void)
         assert(status==result.status && result.entries<=ADRENO_CMD_DB_MAX_ENTRIES);
         if(status==AdrenoCmdDbOK)assert(result.complete && (result.found_mask&0xf7u)==0xf7u);
     }
-    puts("GPU cmd-db: full rows/entries/aux validation, required resources, optional gmxc absence, duplicates/bounds and 10000 mutations PASS");
+    puts("GPU cmd-db: repeated slave rows, full rows/entries/aux validation, required resources, optional gmxc absence, duplicates/bounds and 10000 mutations PASS");
     return 0;
 }

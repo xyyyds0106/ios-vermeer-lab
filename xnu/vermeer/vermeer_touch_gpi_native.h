@@ -105,9 +105,10 @@ static int vtg_swrite32(void *ctx,unsigned off,uint32_t value)
     if(v->slot>=105 || v->bank>=70 || !vtg_quiet(NULL))return 0;
     int allowed=off==0x800+4*v->slot || off==0xc00+4*v->slot ||
         off==0x1000+4*v->bank || off==0x1800+4*v->bank;
-    const unsigned fields[]={0,0x10,0x30,0x38,0x3c,0x58,0x618,0x7f0};
+    const unsigned fields[]={0,4,0x10,0x30,0x38,0x3c,0x58,0x618,0x7f0};
     for(unsigned i=0;i<sizeof(fields)/sizeof(fields[0]);i++)allowed|=off==cb+fields[i];
-    if(!allowed)return 0;vt_wr(touch.smmu,off,value);return 1;
+    if(!allowed || (off==cb+4 && value!=(v->bank_actlr&~2u)))return 0;
+    vt_wr(touch.smmu,off,value);return 1;
 }
 static int vtg_swrite64(void *ctx,unsigned off,uint64_t value)
 {
@@ -141,7 +142,7 @@ static int vtg_route_live(void)
     uint32_t fsr=vt_rd(touch.smmu,cb+0x58);os_atomic_store(&touch.iommu_fsr,fsr,relaxed);
     if(fsr&0xc00001feu){v->retired=1;v->error=VTI_READBACK;return 0;}
     const unsigned check[][2]={{0x1000+4*v->bank,v->image.cbar},{0x1800+4*v->bank,v->image.cba2r},
-        {cb+0x30,v->image.tcr},{cb+0x38,v->image.mair0},{cb+0x3c,v->image.mair1}};
+        {cb+4,v->bank_actlr&~2u},{cb+0x30,v->image.tcr},{cb+0x38,v->image.mair0},{cb+0x3c,v->image.mair1}};
     for(unsigned i=0;i<sizeof(check)/sizeof(check[0]);i++) {
         if(!vtg_sread32(NULL,check[i][0],&value) || value!=check[i][1])return 0;
     }

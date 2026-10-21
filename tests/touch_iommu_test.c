@@ -3,10 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../xnu/vermeer/vermeer_touch_iommu.h"
-enum {NORMAL,IO_FAIL,CLEAN_FAIL,TLB_STUCK,READBACK_BAD,LEASE_LOST,CLOCK_BACKWARD};
+enum {NORMAL,IO_FAIL,CLEAN_FAIL,TLB_STUCK,READBACK_BAD,LEASE_LOST,CLOCK_BACKWARD,
+      ACTLR_STUCK,BANK_CONTROL_CHANGED,BANK_ACTLR_CHANGED};
 struct fixture {
     struct vti v;uint32_t reg[0xd0000/4];uint64_t now;
-    unsigned mode,calls,fail_at,reads,writes,cleaned;
+    unsigned mode,calls,fail_at,reads,writes,cleaned,published;
 };
 static int guard(void *ctx)
 {struct fixture *f=ctx;return !(f->mode==LEASE_LOST && f->calls>=f->fail_at);}
@@ -32,7 +33,7 @@ static int allowed(struct fixture *f,unsigned off,unsigned wide)
     assert(bank<70 && slot<105);
     if(wide)return off==cb+0x20 || off==cb+0x28;
     if(off==0x800+4*slot || off==0xc00+4*slot || off==0x1000+4*bank || off==0x1800+4*bank)return 1;
-    const unsigned fields[]={0,0x10,0x30,0x38,0x3c,0x58,0x618,0x7f0};
+    const unsigned fields[]={0,4,0x10,0x30,0x38,0x3c,0x58,0x618,0x7f0};
     for(unsigned i=0;i<sizeof(fields)/sizeof(fields[0]);i++)if(off==cb+fields[i])return 1;
     return 0;
 }
@@ -40,6 +41,11 @@ static int wr32(void *ctx,unsigned off,uint32_t value)
 {
     struct fixture *f=ctx;assert(allowed(f,off,0));++f->writes;
     assert(f->cleaned);if(io_fail(f))return 0;
+    if(off==0xc00+4*f->v.slot && value==f->v.bank)++f->published;
+    if(off==0x80004+4096*f->v.bank) {
+        assert(value==(f->v.bank_actlr&~2u));
+        if(f->mode==ACTLR_STUCK)return 1;
+    }
     if(off==0x80000+4096*f->v.bank+0x58)f->reg[off/4]&=~value;
     else f->reg[off/4]=value;
     return 1;
@@ -55,6 +61,8 @@ static int clean(void *ctx,void *cpu,size_t bytes)
 {
     struct fixture *f=ctx;assert(cpu==f->v.table_cpu && bytes==16384);++f->cleaned;
     if(io_fail(f) || f->mode==CLEAN_FAIL)return 0;
+    if(f->mode==BANK_CONTROL_CHANGED)f->reg[(0x80000+4096*f->v.bank)/4]|=1;
+    if(f->mode==BANK_ACTLR_CHANGED)f->reg[(0x80004+4096*f->v.bank)/4]^=2;
     return 1;
 }
 static int now_us(void *ctx,uint64_t *value)
@@ -111,6 +119,19 @@ static void normal(void)
     destroy(f);
     f=make(NORMAL);f->reg[0x80c/4]=0x800000b6;f->reg[0xc0c/4]=0x20000;
     assert(vti_prepare(&f->v) && f->v.slot==3);destroy(f);
+    /* The hardware snapshot has ACTLR=3 in every otherwise free bank.
+     * Accept reset bits 0/1, clear CPRE only in the selected bank, and keep
+     * enabled, referenced and all unselected disabled contexts untouched. */
+    for(unsigned actlr=0;actlr<4;actlr++) {
+        f=make(NORMAL);
+        for(unsigned bank=0;bank<70;bank++)f->reg[(0x80004+4096*bank)/4]=actlr;
+        f->reg[(0x80000+4096*68)/4]=0x1000; /* disabled read-as-set control bit */
+        assert(vti_prepare(&f->v) && f->v.bank==68 && f->v.attached && f->published==1);
+        assert(f->v.bank_control==0x1000 && f->v.bank_actlr==actlr && !f->v.unsafe_actlr_banks);
+        for(unsigned bank=0;bank<70;bank++)
+            assert(f->reg[(0x80004+4096*bank)/4]==(bank==68?(actlr&~2u):actlr));
+        verify_tables(f);destroy(f);
+    }
 }
 static void rejects(void)
 {
@@ -133,6 +154,12 @@ static void rejects(void)
     assert(!vti_prepare(&f->v) && !f->writes && f->v.conflict==VTI_CONFLICT_NO_BANK);
     assert(f->v.enabled_banks==1 && f->v.reserved_banks==1 && f->v.unsafe_actlr_banks==68);
     assert(f->v.first_unsafe_bank==1 && f->v.first_unsafe_actlr==0x301);destroy(f);
+    const unsigned changed[]={BANK_CONTROL_CHANGED,BANK_ACTLR_CHANGED};
+    for(unsigned i=0;i<sizeof(changed)/sizeof(changed[0]);i++) {
+        f=make(changed[i]);
+        assert(!vti_prepare(&f->v) && !f->writes && !f->published);
+        assert(f->v.retired && f->v.error==VTI_BUSY && f->v.conflict==VTI_CONFLICT_BANK_CHANGED);destroy(f);
+    }
 }
 static void failures(void)
 {
@@ -149,6 +176,10 @@ static void failures(void)
         if(f->v.touched)assert(f->reg[(0xc00+4*f->v.slot)/4]==0x20000);
         destroy(f);
     }
+    f=make(ACTLR_STUCK);f->reg[(0x80004+4096*68)/4]=3;
+    assert(!vti_prepare(&f->v) && f->v.retired && !f->v.attached && !f->published);
+    assert(f->v.error==VTI_READBACK && f->reg[(0x80004+4096*68)/4]==3);
+    assert(f->reg[(0xc00+4*f->v.slot)/4]==0x20000 && f->reg[(0x800+4*f->v.slot)/4]==0);destroy(f);
 }
 int main(void)
-{normal();rejects();failures();puts("Touch IOMMU: owned SIDb6 4K tables/context, unrelated routes intact, foreign mapping refusal and every IO failure stop PASS");}
+{normal();rejects();failures();puts("Touch IOMMU: owned SIDb6 4K tables/context, CPRE-only ACTLR update, foreign banks intact, changed-bank refusal and every IO failure stop PASS");}

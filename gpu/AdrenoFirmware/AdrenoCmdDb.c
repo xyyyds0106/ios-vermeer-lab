@@ -21,7 +21,7 @@ unsigned AdrenoCmdDbParse(const uint8_t *image,size_t bytes,unsigned qualified_v
         const uint8_t *row=image+8+16*i;unsigned type=u16(row);
         if(!type){ended=1;continue;}
         if(ended || type>7)return fail(r,AdrenoCmdDbHeader);
-        for(unsigned j=0;j<i;j++)if(types[j]==type)return fail(r,AdrenoCmdDbDuplicate);
+        /* cmd-db may split one slave type across several directory rows. */
         types[i]=type;counts[i]=u16(row+6);offsets[i]=144u+u16(row+2);aux[i]=144u+u16(row+4);versions[i]=u16(row+8);
         if(counts[i]>ADRENO_CMD_DB_MAX_ENTRIES-total)return fail(r,AdrenoCmdDbBounds);
         total+=counts[i];
