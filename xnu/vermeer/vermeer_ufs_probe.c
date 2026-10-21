@@ -1,8 +1,9 @@
 /* Opt-in XNU UFS read self-test, adapted from verified K70 probe010.
  * Uses a permanent, contiguous 32KiB allocation in tested RAM; physical DMA
  * descriptors and kernel virtual pointers are kept distinct. Explicit cache
- * maintenance surrounds each request. No disk write/erase/format command.
- * Root remains mockfs md0; no block device is exposed by this test.
+ * maintenance surrounds each request. Diagnostic builds have no disk writes.
+ * The IOS wrapper alone adds bounded volume writes and cache synchronization;
+ * no erase/format/partition command exists. This self-test only reads LUN0.
  */
 #if defined(ARM64_BOARD_CONFIG_SWEET)
 #include <sys/param.h>
@@ -13,7 +14,14 @@
 #include <arm/caches_internal.h>
 #include <vm/pmap.h>
 #include <vm/vm_kern.h>
+#include <pexpert/pexpert.h>
 #include "vermeer_ufs_response.h"
+#include "vermeer_ufs_dma.h"
+#if defined(VERMEER_UFS_IOS_PROFILE)
+#include "vermeer_media_policy.h"
+static int ios_media_writable;
+static uint64_t ios_media_first, ios_media_blocks;
+#endif
 
 extern ppnum_t pmap_find_phys(pmap_t pmap, addr64_t va);
 extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
@@ -21,6 +29,7 @@ int vermeer_ufs_probe(void);
 
 static vm_offset_t ufs_regs, smmu_regs, dma_va;
 static uint64_t dma_pa;
+static int high_dma_enabled;
 #define R(r) ({ uint64_t v; __asm__ volatile("mrs %0, " r : "=r"(v)); v; })
 #define UFS ufs_regs
 #define SMMU smmu_regs
@@ -28,7 +37,7 @@ static uint64_t dma_pa;
 #define COMMAND (DMA + 0x1000)
 #define DATA (DMA + 0x4000)
 #define DMA_END (DATA + 8192)
-#define DMA_SIZE 0x8000U
+#define DMA_SIZE VU_DMA_SIZE
 #define EXPECTED_LAST_LBA 61842431U
 #define EXPECTED_CRC32 0x45fbee46U
 
@@ -54,13 +63,15 @@ static int init_mappings(void)
     ufs_regs = ml_io_map(0x01d84000, 0x3000);
     smmu_regs = ml_io_map(0x15000000, 0x90000);
     if (!ufs_regs || !smmu_regs) return ENOMEM;
+    PE_parse_boot_argn("vermeer_ufs_highdma", &high_dma_enabled, sizeof(high_dma_enabled));
     if (kmem_alloc_contig(kernel_map, &dma_va, DMA_SIZE, PAGE_MASK, 0, 0,
         KMA_DATA | KMA_ZERO | KMA_PERMANENT, VM_KERN_MEMORY_IOKIT) != KERN_SUCCESS)
         return ENOMEM;
     ppnum_t first = pmap_find_phys(kernel_pmap, (addr64_t)dma_va);
     if (!first) return ENOMEM;
     dma_pa = ptoa_64(first);
-    if (dma_pa < 0xc0000000ULL || dma_pa + DMA_SIZE > 0xd0000000ULL) return ENXIO;
+    if (!vu_dma_allowed(dma_pa, high_dma_enabled,
+        *(volatile uint32_t *)ufs_regs, *(volatile uint32_t *)(smmu_regs + 0x28))) return ENXIO;
     for (unsigned off = 0; off < DMA_SIZE; off += PAGE_SIZE) {
         ppnum_t pn = pmap_find_phys(kernel_pmap, (addr64_t)(dma_va + off));
         if (!pn || ptoa_64(pn) != dma_pa + off) return ENXIO;
@@ -131,7 +142,7 @@ static int identity_candidate(void)
     /* Static buffer range must stay inside independently tested System RAM;
      * never overlap the executing image or live FDT/bootloader request list.
      */
-    if (dma_pa < 0xc0000000ULL || dma_pa + DMA_SIZE > 0xd0000000ULL) return 3;
+    if (!vu_dma_allowed(dma_pa, high_dma_enabled, rd(UFS), rd(SMMU + 0x28))) return 3;
     return 0;
 }
 
@@ -142,8 +153,14 @@ static int scsi_at(uint8_t opcode, unsigned length, uint32_t lba,
                    uint32_t *ocs, uint32_t *status)
 {
     static uint8_t tag;
+    bool write = false, sync = false;
+#if defined(VERMEER_UFS_IOS_PROFILE)
+    write = opcode == 0x2a && length && length <= 8192 && !(length % 4096) &&
+        vi_write_allowed(ios_media_writable, ios_media_first, ios_media_blocks, lba, length / 4096);
+    sync = opcode == 0x35 && !length && !lba && ios_media_writable == 1;
+#endif
     last_sense.response = last_sense.key = last_sense.asc = last_sense.ascq = 0xff;
-    if (!((opcode == 0 && length == 0) || (opcode == 0x1b && length == 0) ||
+    if (!(write || sync || (opcode == 0 && length == 0) || (opcode == 0x1b && length == 0) ||
           (opcode == 0x25 && length == 8) ||
           (opcode == 0x28 &&
 #if defined(VERMEER_UFS_BLOCK)
@@ -153,14 +170,14 @@ static int scsi_at(uint8_t opcode, unsigned length, uint32_t lba,
            length == 8192 && lba == 0
 #endif
           ))) return 10;
-    if (rd(UFS + 0x58) || rd(UFS + 0x50) != dma_pa || rd(UFS + 0x54) ||
+    if (rd(UFS + 0x58) || rd(UFS + 0x50) != vu_lo(dma_pa) || rd(UFS + 0x54) != vu_hi(dma_pa) ||
         rd(UFS + 0x60) != 1) return 11;
     zero(DMA, 32);
     zero(COMMAND, 1040);
-    zero(DATA, 8192);
+    if (!write) zero(DATA, 8192);
     volatile uint8_t *cmd = (volatile uint8_t *)COMMAND;
     cmd[0] = 1; /* UPIU_COMMAND */
-    cmd[1] = length ? 0x40 : 0; /* Device to host. */
+    cmd[1] = length ? (write ? 0x20 : 0x40) : 0;
     uint8_t lun = opcode == 0x1b ? 0xd0 : 0;
     cmd[2] = lun; /* Power command only to device WLUN; data only LUN0. */
     cmd[3] = ++tag;
@@ -170,7 +187,7 @@ static int scsi_at(uint8_t opcode, unsigned length, uint32_t lba,
     cmd[15] = length;
     cmd[16] = opcode;
     if (opcode == 0x1b) cmd[20] = 0x10; /* Active power mode, as Linux. */
-    if (opcode == 0x28) {
+    if (opcode == 0x28 || write) {
         cmd[18] = lba >> 24;
         cmd[19] = lba >> 16;
         cmd[20] = lba >> 8;
@@ -179,23 +196,17 @@ static int scsi_at(uint8_t opcode, unsigned length, uint32_t lba,
         cmd[24] = length / 4096;
     }
     volatile uint32_t *utrd = (volatile uint32_t *)DMA;
-    utrd[0] = (1U << 28) | ((length ? 2U : 0U) << 25) | (1U << 24);
+    utrd[0] = (1U << 28) | ((length ? (write ? 1U : 2U) : 0U) << 25) | (1U << 24);
     utrd[2] = 15;
-    utrd[4] = (uint32_t)(dma_pa + 0x1000);
-    utrd[5] = 0;
+    vu_dma_descriptors(utrd, (volatile uint32_t *)(COMMAND + 1024), dma_pa, length);
     utrd[6] = (128U << 16) | 128U; /* 512-byte response at +512. */
     if (length) {
         utrd[7] = (256U << 16) | 1U; /* One PRDT entry at +1024. */
-        volatile uint32_t *prdt = (volatile uint32_t *)(COMMAND + 1024);
-        prdt[0] = (uint32_t)(dma_pa + 0x4000);
-        prdt[1] = 0;
-        prdt[2] = 0;
-        prdt[3] = length - 1;
     }
     dma_sync();
     __asm__ volatile("dsb sy" ::: "memory");
     wr(0x58, 1);
-    if (wait_register(0x58, 1, 0, opcode == 0x1b ? 10 : 1)) return 1;
+    if (wait_register(0x58, 1, 0, opcode == 0x1b || write || sync ? 10 : 1)) return 1;
     __asm__ volatile("dsb sy" ::: "memory");
     dma_sync();
     *ocs = utrd[2] & 255;
@@ -242,10 +253,10 @@ int vermeer_ufs_probe(void)
         text(6, "TRANSFER LIST DID NOT STOP");
         return ENXIO;
     }
-    wr(0x50, (uint32_t)dma_pa);
-    wr(0x54, 0);
+    wr(0x50, vu_lo(dma_pa));
+    wr(0x54, vu_hi(dma_pa));
     wr(0x60, 1);
-    if (rd(UFS + 0x50) != dma_pa || rd(UFS + 0x54) || rd(UFS + 0x60) != 1) {
+    if (rd(UFS + 0x50) != vu_lo(dma_pa) || rd(UFS + 0x54) != vu_hi(dma_pa) || rd(UFS + 0x60) != 1) {
         text(6, "OWN TRANSFER LIST NOT ACCEPTED - STOP");
         return ENXIO;
     }

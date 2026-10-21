@@ -176,3 +176,29 @@ FDT memory ranges and fixed reservations with the bounded probe011 guard.
 Unknown profiles fail. Initial high-RAM XNU tests use the proven32MiB HFS RAM
 disk and source PID1, with UFS opt-in omitted: the current transport's DMA
 allocation is restricted to low RAM, so high-address DMA remains untested.
+
+The first2GiB XNU/HFS diagnostic boot is now user-reported successful after
+150seconds: source PID1 starts and heartbeats continue. Kernel39451667461,
+shim277d1e2, image SHA256
+3c3ee5216070de48a8b46a53160e749541ee99d1885283126b8311b4ab74a7b6.
+UFS opt-in was omitted; high-address storage DMA is the next separate test.
+
+At the user's request, subsequent hardware work switches to an integrated
+startup attempt rather than separate small-feature boots. The `vermeer-ios`
+profile combines the K70 transport with reference software compatibility
+patches through0045 (excluding the Sweet storage driver), including crypto,
+entitlements/platform signatures, bindfs, key-store/watchdog stand-ins and
+console crash reasons. It selects `rd=vermeerufs0` and the prepared official
+16.7.16/20H392 HFSX root. No Sweet USB/touch/modem drivers are included.
+
+The integration supports opt-in high DMA (`vermeer_ufs_highdma=1`) only inside
+the tested2GiB range after UFS64AS/SMMU/page-contiguity checks. Media writes
+exist only in the IOS wrapper: exact userdata geometry, journaled16GiB HFSX
+header and supplied volume UUID must match before `vermeer_ufs_rw=1` enables
+them. Every WRITE10 is checked again against the first16GiB of userdata;
+partial4KiB writes preserve surrounding bytes. Cache synchronization is
+provided. Other profiles retain write rejection. Host tests cover descriptor
+upper words, capability/opt-in guards, malformed volume headers and partition/
+volume bounds. The integrated build and real-device startup remain unverified;
+the local root candidate is not yet flashed. Overwriting userdata and enabling
+root writes require the user's concrete approval before execution.

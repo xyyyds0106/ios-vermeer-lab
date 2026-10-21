@@ -9,7 +9,7 @@ on:
       profile:
         description: reference reproduces upstream; vermeer-early has no storage drivers
         type: choice
-        options: [vermeer-early, vermeer-ramroot, vermeer-ufs-probe, vermeer-hfs-ramroot, vermeer-ufs-block, reference]
+        options: [vermeer-early, vermeer-ramroot, vermeer-ufs-probe, vermeer-hfs-ramroot, vermeer-ufs-block, vermeer-ios, reference]
         default: vermeer-early
       macos_version:
         description: macOS release whose xnu to build (13.5 = xnu-8796, iOS 16 era)
@@ -47,6 +47,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check storage bounds and address encoding
+        run: |
+          mkdir -p host-test
+          for test in gpt dma media_policy; do
+            clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g "tests/${test}_test.c" -o "host-test/$test"
+            "host-test/$test"
+          done
+
       - name: Fetch build script
         run: |
           git init -q dxb
@@ -67,6 +75,9 @@ jobs:
             cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
           elif [ "$PROFILE" = vermeer-ufs-block ]; then
             python3 tools/prepare_vermeer.py xnu/patches .ci-patches --ufs-block
+            cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
+          elif [ "$PROFILE" = vermeer-ios ]; then
+            python3 tools/prepare_vermeer.py xnu/patches .ci-patches --ios
             cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
           elif [ "$PROFILE" = reference ]; then
             cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/

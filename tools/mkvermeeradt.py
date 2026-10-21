@@ -1,6 +1,7 @@
 """Minimal single-core vermeer ADT for the early, storage-free XNU build."""
 import os
 import argparse
+import hashlib
 import itertools
 from pathlib import Path
 import struct
@@ -18,7 +19,7 @@ def node(name, props=(), children=()):
     result.children = list(children)
     return result
 
-def build(highram=False):
+def build(highram=False, ios=False):
     # Probe011 verified sparse access to exactly this additional window.
     phys, size = (0x8c0000000, 0x80000000) if highram else (0xc0000000, 0x10000000)
     cpu = node('cpu0', [
@@ -32,7 +33,7 @@ def build(highram=False):
         ('memory-frequency', u32(100000000)), ('peripheral-frequency', u32(19200000)),
         ('fixed-frequency', u32(19200000)),
     ])
-    return node('device-tree', [
+    result = node('device-tree', [
         ('compatible', string('xiaomi,vermeer') + string('xiaomi,sweet') + string('qcom,sm8550') + string('AppleARM')),
         ('model', string('Redmi K70')), ('target-type', string('vermeer')),
         ('manufacturer', string('Xiaomi')), ('#address-cells', u32(2)), ('#size-cells', u32(2)),
@@ -56,13 +57,20 @@ def build(highram=False):
         node('sweet-fbcon', [('reg', u64(0xb8000000, 1440 * 3200 * 4)),
                             ('width', u32(1440)), ('height', u32(3200)), ('stride', u32(5760))]),
     ])
+    if ios:
+        chosen = next(c for c in result.children if c.name == 'chosen')
+        chosen.props.append(('boot-manifest-hash', 0, hashlib.sha384(b'vermeer experimental iOS root').digest()))
+        defaults = next(c for c in result.children if c.name == 'defaults')
+        defaults.props.append(('no-effaceable-storage', 0, b''))
+    return result
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('out')
     parser.add_argument('--highram', action='store_true', help='probe011 window: 8c0000000..940000000, 2GiB; UFS DMA not validated here')
+    parser.add_argument('--ios', action='store_true', help='experimental iOS root boot manifest/defaults; no device calibration changes')
     args = parser.parse_args()
-    tree = build(args.highram)
+    tree = build(args.highram, args.ios)
     blob = adt.serialize(tree)
     parsed, used = adt.parse(blob)
     assert used == len(blob)

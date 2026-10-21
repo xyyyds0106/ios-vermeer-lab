@@ -12,19 +12,27 @@ import sys
 import difflib
 
 source, target = map(Path, sys.argv[1:3])
-ufs_block = '--ufs-block' in sys.argv[3:]
+ios = '--ios' in sys.argv[3:]
+ufs_block = '--ufs-block' in sys.argv[3:] or ios
 hfs_ramroot = '--hfs-ramroot' in sys.argv[3:] or ufs_block
 ufs_probe = '--ufs-probe' in sys.argv[3:] or hfs_ramroot
 ramroot = '--ramroot' in sys.argv[3:] or ufs_probe
-last_patch = 27 if hfs_ramroot else (25 if ramroot else 18)
+last_patch = 45 if ios else (27 if hfs_ramroot else (25 if ramroot else 18))
 target.mkdir(parents=True, exist_ok=True)
 if any(target.iterdir()):
     raise SystemExit('Destination must be empty')
 patches = sorted(p for p in source.glob('*.patch') if int(p.name[:4]) <= last_patch)
 assert len(patches) == last_patch, 'Incomplete reference patch series'
+if ios:
+    # Replace the Sweet UFS transport entirely with the guarded K70 driver.
+    patches = [p for p in patches if int(p.name[:4]) not in (28, 30, 34)]
 counts = {'framebuffer': 0, 'width': 0, 'height': 0, 'stride': 0, 'marker': 0, 'timer': 0}
 for patch in patches:
     text = patch.read_text()
+    if ios and patch.name.startswith('0031-'):
+        # Retain writable-root selection, but never bypass dirty nonjournaled
+        # HFS rejection. Integrated root requires a journaled HFSX header.
+        text = text.split('--- a/bsd/sweet_hfs/')[0]
     for key, old, new in (
         ('framebuffer', '0x9c000000', '0xb8000000'),
         ('width', '1080u', '1440u'),
@@ -40,10 +48,10 @@ for patch in patches:
 assert counts == {'framebuffer': 6, 'width': 2, 'height': 2, 'stride': 4, 'marker': 1, 'timer': 1}, counts
 extras = ('0019-vermeer-early-io-budget.patch', '0020-vermeer-boot-cpu-match.patch')
 if ufs_probe:
-    extras += ('0021-vermeer-ufs-read-probe-hook.patch',)
+    extras += (('0021-vermeer-ios-root-hook.patch' if ios else '0021-vermeer-ufs-read-probe-hook.patch'),)
 for name in extras:
     extra = source.parent / 'vermeer' / name
-    if ufs_block and name == '0021-vermeer-ufs-read-probe-hook.patch':
+    if ufs_block and not ios and name == '0021-vermeer-ufs-read-probe-hook.patch':
         data = extra.read_text()
         data = data.replace('bsd/dev/vermeer_ufs_probe.c', 'bsd/dev/vermeer_ufs_block.c')
         data = data.replace('vermeer_ufs_probe', 'vermeer_ufs_block_init')
@@ -55,9 +63,11 @@ for name in extras:
         shutil.copyfile(extra, target / extra.name)
 if ufs_probe:
     generated = ''
-    names = ('vermeer_ufs_probe.c', 'vermeer_ufs_response.h')
+    names = ('vermeer_ufs_probe.c', 'vermeer_ufs_response.h', 'vermeer_ufs_dma.h')
     if ufs_block:
         names += ('vermeer_ufs_block.c', 'vermeer_gpt.h')
+    if ios:
+        names += ('vermeer_ufs_ios.c', 'vermeer_media_policy.h')
     for name in names:
         data = (source.parent / 'vermeer' / name).read_text()
         path = 'bsd/dev/' + name

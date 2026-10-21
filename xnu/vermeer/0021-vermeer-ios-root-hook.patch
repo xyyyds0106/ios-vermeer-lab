@@ -1,0 +1,37 @@
+diff --git a/bsd/conf/files b/bsd/conf/files
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -103,6 +103,7 @@
+ 
+ bsd/dev/random/randomdev.c		standard
+ 
++bsd/dev/vermeer_ufs_ios.c			standard
+ bsd/dev/memdev.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+diff --git a/iokit/bsddev/IOKitBSDInit.cpp b/iokit/bsddev/IOKitBSDInit.cpp
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -766,6 +766,22 @@
+ 		}
+ 	}
+ 
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	if (strcmp(rdBootVar, "vermeerufs0") == 0) {
++		extern int vermeer_ufs_ios_rootdev(dev_t *dev);
++		OSSafeReleaseNULL(matching);
++		IOLog("VERMEER INTEGRATED: selecting prepared iOS UFS root\n");
++		int error = vermeer_ufs_ios_rootdev(root);
++		if (error) {
++			panic("VERMEER INTEGRATED: UFS root unavailable: %d", error);
++		}
++		strlcpy(rootName, rdBootVar, rootNameSize);
++		IOLog("BSD root: %s, major %d, minor %d\n", rootName, major(*root), minor(*root));
++		*oflags = 0;
++		goto iofrootx;
++	}
++#endif
++
+ //
+ //	Now check if we are trying to root on a memory device
+ //
