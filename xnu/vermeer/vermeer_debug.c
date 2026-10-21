@@ -12,6 +12,10 @@ typedef void (*vermeer_frame_status_fn)(void);
 static vermeer_frame_status_fn _Atomic frame_status;
 static vermeer_frame_status_fn _Atomic input_status;
 static uint64_t _Atomic input_calls,input_dispatches;
+typedef int (*vermeer_control_request_fn)(const char *,unsigned);
+static vermeer_control_request_fn _Atomic control_request;
+void vermeer_debug_control_register(vermeer_control_request_fn);
+int vermeer_debug_control_request(const char *,unsigned);
 void vermeer_debug_append(const char *data, int size);
 unsigned vermeer_debug_copy(uint64_t *pos, char *out, unsigned max);
 uint64_t vermeer_debug_total(void);
@@ -88,3 +92,11 @@ void vermeer_debug_input_status(void)
 }
 void vermeer_debug_input_register(vermeer_frame_status_fn callback)
 { os_atomic_store(&input_status,callback,release); }
+/* Optional permanent callback only parses/queues bounded worker requests. */
+void vermeer_debug_control_register(vermeer_control_request_fn callback)
+{os_atomic_store(&control_request,callback,release);}
+int vermeer_debug_control_request(const char *text,unsigned n)
+{
+    vermeer_control_request_fn callback=os_atomic_load(&control_request,acquire);
+    return callback?callback(text,n):0;
+}

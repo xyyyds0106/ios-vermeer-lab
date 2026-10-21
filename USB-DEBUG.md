@@ -60,6 +60,27 @@ sampling and post-sample ping on the test handset, including GUI008 after the
 user reports a frozen picture.
 
 No shell, arbitrary memory access, storage operations or reboot commands are exposed.
+The later local restart prototype is separate from GUI012/source42ce3a7.
+Its GUI-only `vermeer_restart_probe=1` worker is default off. `rp <32hexnonce>`
+queues a metadata-only BEFORE_PROBE record; `ra <nonce> <16hexseq> <8hexcrc>`
+acknowledges that record after host durable save. Both commands only queue from
+the USB callback. No mapping or read occurs before the matching acknowledgement.
+The worker maps only the exact K70 arbiter core/config regions, preserving16KB
+page offsets, and reports version/features/APID/map/owner. It never maps the
+observer/write channel regions or issues a PMIC transaction/reset. Missing ACK
+times out, failed metadata policy retires the job, and an external access abort
+is not caught/recovered by this prototype. Missing result remains unknown.
+
+The separate default-off `vermeer_spmi_restart.h` and
+`vermeer_restart_control.h` are offline backend/queue candidates, not registered
+reset commands. They constrain the SDAM cell to SID0/7148 and preserve bit0,
+require v7/EE0 ownership, bound transfers, retire I/O failures/timeouts, validate
+readback and recheck monotonic time/live lease/enabled/state between phases.
+Native storage/DMA shutdown, firmware-destination qualification and a host
+collector for this new handshake remain incomplete. The user's latest manual
+test direction pauses this automatic-return work; it is not in GUI012 and is
+not a prerequisite for the current GPU/touch investigation.
+
 This is log transport and bounded queries, not an interactive kernel debugger.
 After a cable disconnect, configured bus reset, overflow or DMA/endpoint error,
 the interface stops and retains all DMA memory. Reboot the temporary kernel to

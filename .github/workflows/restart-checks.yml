@@ -1,0 +1,29 @@
+name: Restricted restart candidate host checks
+on:
+  push:
+    paths:
+      - 'xnu/vermeer/vermeer_spmi_restart.h'
+      - 'xnu/vermeer/vermeer_restart_control.h'
+      - 'tests/restart_control_test.c'
+      - 'tests/run-restart-tests.sh'
+      - '.github/workflows/restart-checks.yml'
+  pull_request:
+    paths:
+      - 'xnu/vermeer/vermeer_spmi_restart.h'
+      - 'xnu/vermeer/vermeer_restart_control.h'
+      - 'tests/restart_control_test.c'
+      - 'tests/run-restart-tests.sh'
+      - '.github/workflows/restart-checks.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Default-off backend and one-shot acknowledgement policy
+        env:
+          CC: clang
+        run: sh tests/run-restart-tests.sh

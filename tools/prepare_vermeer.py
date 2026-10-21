@@ -131,7 +131,7 @@ if gui:
     (target / '0066-vermeer-frame-policy.patch').write_text(''.join(
         difflib.unified_diff([], data.splitlines(True), fromfile='/dev/null', tofile='b/' + path)))
     generated = ''
-    for name in ('vermeer_touch.c','vermeer_goodix_packet.h','vermeer_goodix_info.h','vermeer_geni_spi.h','vermeer_geni_dma.h','vermeer_touch_route.h','vermeer_touch_clock.h'):
+    for name in ('vermeer_touch.c','vermeer_goodix_packet.h','vermeer_goodix_info.h','vermeer_geni_spi.h','vermeer_geni_dma.h','vermeer_touch_route.h','vermeer_touch_clock.h','vermeer_restart_probe.c','vermeer_restart_control.h','vermeer_spmi_restart.h'):
         data = (source.parent / 'vermeer' / name).read_text()
         path = 'bsd/dev/' + name
         generated += ''.join(difflib.unified_diff([], data.splitlines(True),

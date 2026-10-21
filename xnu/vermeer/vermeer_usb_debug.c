@@ -26,6 +26,7 @@ extern uint64_t vermeer_debug_dropped(void);
 extern int vermeer_debug_sample_request(void);
 extern int vermeer_debug_frame_request(void);
 extern void vermeer_debug_input_status(void);
+extern int vermeer_debug_control_request(const char *,unsigned);
 void vermeer_usb_debug_start(void);
 
 #define GCTL 0xc110
@@ -273,6 +274,8 @@ static void command_line(void)
         if (!vermeer_debug_frame_request()) printf("VERMEER FRAME: unavailable\n");
     } else if (!strcmp(u.command,"input")) {
         vermeer_debug_input_status();
+    } else if (vermeer_debug_control_request(u.command,u.command_n)) {
+        /* Optional GUI-only control worker: queue-only callback, default off. */
     } else if (u.command_n) printf("VERMEER DEBUG: commands help status ping replay sample frame input; queries only\n");
     u.command_n=0;u.command_overflow=false;
 }
