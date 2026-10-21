@@ -343,6 +343,14 @@ static int vtg_prepare(void)
     if(!vgpt_start(&touch.transport)){vtg_status();return 0;}
     printf("VERMEER GPI READBACK: allocated and started contexts verified; DMA not submitted\n");
     printf("VERMEER TOUCH PHASE: GPI start complete\n");
+    printf("VERMEER TOUCH PHASE: GPI NOP fetch begin; one TX TRE, no SPI GO or payload DMA\n");
+    if(touch.manual_mode==2)vt_sleep(200);
+    if(!vgpt_probe_nop(&touch.transport)) {
+        vtg_status();printf("VERMEER GPI NOP: refused phase=%u error=%u; resources retained\n",
+            touch.transport.phase,touch.transport.error);return 0;
+    }
+    printf("VERMEER GPI NOP: real TX RP advanced one TRE; RX and event pointers unchanged\n");
+    if(touch.manual_mode==2)vt_sleep(200);
     for(unsigned i=0;i<4;i++) {
         unsigned reg=(44+i)*0x1000;
         if(vt_rd(touch.gpio,reg)!=touch.pins[i])goto failed;

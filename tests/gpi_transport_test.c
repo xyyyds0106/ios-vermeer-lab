@@ -8,13 +8,15 @@ enum {HEALTHY,NO_COMMAND_IRQ,NO_EVENTS,ERROR_EVENT,SHORT_EVENT,WRONG_POINTER,
       DUPLICATE_EVENT,WRONG_CHANNEL,WRONG_TYPE,ACTIVE_SERIAL,REVOKE_TX_DB,SLOW_CALLBACK,
       IO_FAILURE,CACHE_FAILURE,REVERSE_EVENTS,LEASE_BOUNDARY,BACKWARD_TIME,PHASE_CHANGE,
       CACHE_REVOKE,WAIT_FAIL,BAD_PRODUCER,BAD_CHANNEL_RP,SLOW_COMMAND,NO_COMMAND_CHANGE,WRONG_COMMAND_STATE,
-      TRACE_REVOKE,TRACE_TIMEOUT,IGNORE_WRITE,WRITE_GUARD_TIMEOUT};
+      TRACE_REVOKE,TRACE_TIMEOUT,IGNORE_WRITE,WRITE_GUARD_TIMEOUT,
+      NOP_NO_PROGRESS,NOP_ERROR,NOP_RX_MOVED,NOP_EVENT_MOVED,NOP_BAD_RP};
 struct fixture {
     struct vgpt g;uint32_t reg[0x14000/4];uint64_t now;
     unsigned mode,reads,writes,cache_count,fail_at,callbacks,ev_prod,rx_doorbell,revoked;
     unsigned clean[5],invalid[5],transfers;
     unsigned trace_count,trace_last,trace_fail;
     unsigned ignore_register;
+    unsigned nops;
 };
 static unsigned page_for(struct fixture *f,void *cpu)
 {for(unsigned i=0;i<5;i++)if(f->g.page[i].cpu==cpu)return i;assert(0);return 0;}
@@ -101,7 +103,19 @@ static int wr(void *ctx,unsigned off,uint32_t value)
         f->reg[off/4]=value;
         if(off==0x1100c)pointer(f,0x11010,((uint64_t)value<<32)|f->reg[0x11008/4]);
         if(off==0x12008)++f->rx_doorbell;
-        if(off==0x12000)execute(f,value);
+        if(off==0x12000) {
+            unsigned index=(value-(uint32_t)f->g.page[VGPT_TR].iova)/16;
+            struct vgp_tre last=((struct vgp_tre *)f->g.page[VGPT_TR].cpu)[(index+63)&63];
+            if(last.word[3]==0x00010000) {
+                assert(index==1 && !last.word[0] && !last.word[1] && !last.word[2]);
+                assert(f->clean[VGPT_TR] && !f->rx_doorbell && !f->transfers && !f->g.nop_verified);
+                ++f->nops;
+                if(f->mode!=NOP_NO_PROGRESS)pointer(f,0x10010,f->g.page[VGPT_TR].iova+(f->mode==NOP_BAD_RP?32:16));
+                if(f->mode==NOP_ERROR)f->reg[0x13100/4]=1;
+                if(f->mode==NOP_RX_MOVED)pointer(f,0x10090,f->g.page[VGPT_RR].iova+16);
+                if(f->mode==NOP_EVENT_MOVED)pointer(f,0x11010,f->g.page[VGPT_ER].iova+16);
+            } else execute(f,value);
+        }
     }
     return 1;
 }
@@ -312,5 +326,39 @@ static void context_readback(void)
     for(unsigned i=0;i<sizeof rx;i++)assert(rx[i]==0xcc);
     destroy(f);
 }
+static void nop_probe(void)
+{
+    struct fixture *f=make(HEALTHY);uint8_t tx[8]={0},rx[8];
+    assert(vgpt_start(&f->g));memset(f->g.page[VGPT_TX].cpu,0x5c,16384);memset(f->g.page[VGPT_RX].cpu,0xa7,16384);
+    f->callbacks=f->cache_count=0;unsigned writes=f->writes;
+    assert(vgpt_probe_nop(&f->g) && f->g.nop_verified && f->g.phase==VGPT_READY);
+    unsigned calls=f->callbacks;assert(f->cache_count==1 && f->writes==writes+1 && f->nops==1);
+    assert(!f->transfers && !f->rx_doorbell && !f->g.events && !f->g.exchanges && f->g.tx_wp==1);
+    for(unsigned i=0;i<16384;i++) {
+        assert(((uint8_t *)f->g.page[VGPT_TX].cpu)[i]==0x5c);
+        assert(((uint8_t *)f->g.page[VGPT_RX].cpu)[i]==0xa7);
+    }
+    writes=f->writes;unsigned reads=f->reads;
+    assert(!vgpt_probe_nop(&f->g) && f->writes==writes && f->reads==reads);
+    assert(vgpt_exchange(&f->g,tx,rx,8,0,128) && f->g.tx_wp==4 && f->g.exchanges==1);destroy(f);
+    for(unsigned mode=NOP_NO_PROGRESS;mode<=NOP_BAD_RP;mode++) {
+        f=make(HEALTHY);assert(vgpt_start(&f->g));f->mode=mode;
+        assert(!vgpt_probe_nop(&f->g) && f->g.quarantined && !f->g.nop_verified && f->nops==1);
+        assert(!f->transfers && !f->rx_doorbell);
+        writes=f->writes;reads=f->reads;
+        assert(!vgpt_probe_nop(&f->g) && !vgpt_exchange(&f->g,tx,rx,8,0,128));
+        assert(f->writes==writes && f->reads==reads);destroy(f);
+    }
+    const unsigned faults[]={IO_FAILURE,LEASE_BOUNDARY,BACKWARD_TIME,PHASE_CHANGE};
+    for(unsigned mode=0;mode<sizeof faults/sizeof faults[0];mode++)for(unsigned i=1;i<=calls;i++) {
+        f=make(HEALTHY);assert(vgpt_start(&f->g));f->callbacks=0;f->mode=faults[mode];f->fail_at=i;
+        assert(!vgpt_probe_nop(&f->g) && f->g.quarantined && !f->g.nop_verified && f->callbacks==i);
+        assert(!f->transfers && !f->rx_doorbell);destroy(f);
+    }
+    for(unsigned mode=CACHE_FAILURE;mode<=CACHE_REVOKE;mode+=CACHE_REVOKE-CACHE_FAILURE) {
+        f=make(HEALTHY);assert(vgpt_start(&f->g));f->mode=mode;f->cache_count=0;f->fail_at=1;
+        assert(!vgpt_probe_nop(&f->g) && f->g.quarantined && !f->g.nop_verified && !f->nops);destroy(f);
+    }
+}
 int main(void)
-{healthy();irq_contract();faults();transfer_boundaries();context_readback();puts("GPI transport: context write/readback and every live-field mutation, real command/doorbell lifecycle, ring wrap, both validated completions, IRQ contract, first-exchange checkpoints, every transfer IO/cache/lease/clock/phase boundary and permanent quarantine PASS");}
+{healthy();irq_contract();faults();transfer_boundaries();context_readback();nop_probe();puts("GPI transport: isolated NOP real-pointer lifecycle and every failure boundary; context write/readback and every live-field mutation; command/doorbell lifecycle, ring wrap, completions, IRQ contract, checkpoints and permanent quarantine PASS");}

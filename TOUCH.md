@@ -273,6 +273,24 @@ rechecked before the store. DMA physical/table/context values are logged
 before startup. These changes improve qualification and fault localization;
 they do not establish a fix for the physical restart.
 
+GUI021's clean Fastboot boot reached GUI/USB baseline and rail ACKs. All
+programmed/started ring contexts read back correctly. The first RX doorbell
+store completed, then USB disconnected after the TX store-begin boundary;
+the user confirmed Fastboot. No TX store-complete or panic was exported.
+The remaining pre-store lease checks and asynchronous firmware/DMA activity
+prevent assigning an exact fault instruction from those logs alone.
+
+The next candidate first submits one unlinked, flag-free NOP TRE (type0x01,
+as defined by pinned `msm_gpi.c` and `msm_gpi.h`). Before pin/SE reconfiguration,
+the real TX channel RP must advance by one element within100ms while RX/event
+producer pointers remain unchanged. It requests no SPI GO, buffer DMA or
+completion event. Success advances the actual ring WP for subsequent SPI;
+failure quarantines all retained resources and blocks SPI initialization.
+Host tests cover progress/error/unexpected-pointer cases, subsequent normal
+SPI from the advanced WP, and every IO/lease/cache/time/phase boundary. This
+isolates real GPI ring fetching from the later serial/payload path; software
+fixtures alone do not demonstrate either hardware operation.
+
 The GUI build registers two shared SMMU C objects (`vermeer_touch_smmu_tables.c`
 and `vermeer_touch_smmu_context.c`). GPU integration must reuse their exported
 ArmSmmu4K symbols instead of linking duplicate copies of the same sources.

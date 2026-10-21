@@ -58,7 +58,7 @@ struct vgpt {
     struct vgpt_ops io;struct vgpt_page page[VGPT_PAGES];
     unsigned phase,active_phase,error,quarantined,hardware_touched,tx_wp,rx_wp,ev_rp;
     unsigned last_channel,last_code,last_status,last_length,events,commands;
-    unsigned checkpoint,exchanges;
+    unsigned checkpoint,exchanges,nop_verified;
     unsigned verify_register;uint32_t verify_expected,verify_observed,verify_mask;
     uint64_t begin,last,budget,command_begin;unsigned command_budget;
 };
@@ -234,6 +234,42 @@ static inline int vgpt_start(struct vgpt *g)
     if(!vgpt_command(g,1,1,2) || !vgpt_command(g,0,1,2))return 0;
     if(!vgpt_context(g,0,2) || !vgpt_context(g,1,2) || !vgpt_context(g,2,1))return 0;
     g->phase=g->active_phase=VGPT_READY;return vgpt_guard(g);
+}
+/* Pinned msm_gpi.c NOOP_TRE = type0x01, no flags. A single unlinked NOP
+ * requests neither a serial command nor an event. Real channel RP must
+ * advance exactly once; RX/event producers must remain unchanged. */
+static inline int vgpt_probe_nop(struct vgpt *g)
+{
+    if(!vgpt_valid(g) || g->phase!=VGPT_READY || g->quarantined || g->nop_verified ||
+       g->exchanges || g->tx_wp || g->rx_wp || g->ev_rp)return 0;
+    uint64_t now;
+    if(g->io.now_us(g->io.ctx,&now)!=1 || now<g->last)return vgpt_fail(g,VGPT_CLOCK);
+    g->last=g->begin=now;g->budget=100000;g->phase=g->active_phase=VGPT_TRANSFER;
+    if(!vgpt_context(g,0,2) || !vgpt_context(g,1,2) || !vgpt_context(g,2,1))return 0;
+    const unsigned reg[3]={0x10010,0x10090,0x11010},pages[3]={VGPT_TR,VGPT_RR,VGPT_ER};
+    for(unsigned i=0;i<3;i++) {
+        unsigned index;
+        if(!vgpt_pointer(g,reg[i],pages[i],i==2?4096:1024,&index))return 0;
+        if(index)return vgpt_fail(g,VGPT_STATE);
+    }
+    if(!vgpt_guard(g))return 0;
+    ((struct vgp_tre *)g->page[VGPT_TR].cpu)[0]=(struct vgp_tre){{0,0,0,0x00010000}};
+    if(!vgpt_cache(g,VGPT_TR,VGPT_CLEAN))return 0;
+    g->tx_wp=1;
+    if(!vgpt_wr(g,0x12000,(uint32_t)(g->page[VGPT_TR].iova+16)))return 0;
+    for(unsigned poll=0;poll<5000;poll++) {
+        unsigned tx,rx,event;
+        if(!vgpt_errors(g) || !vgpt_pointer(g,0x10010,VGPT_TR,1024,&tx) ||
+           !vgpt_pointer(g,0x10090,VGPT_RR,1024,&rx) ||
+           !vgpt_pointer(g,0x11010,VGPT_ER,4096,&event))return 0;
+        if(rx || event || tx>1)return vgpt_fail(g,VGPT_EVENT);
+        if(tx==1) {
+            if(!vgpt_guard(g))return 0;
+            g->nop_verified=1;g->phase=g->active_phase=VGPT_READY;return 1;
+        }
+        if(!vgpt_pause(g))return 0;
+    }
+    return vgpt_fail(g,VGPT_TIMEOUT);
 }
 static inline int vgpt_exchange(struct vgpt *g,const uint8_t *tx,uint8_t *rx,unsigned count,
     unsigned clock_source,unsigned divider)
