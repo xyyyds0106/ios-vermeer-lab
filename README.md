@@ -32,6 +32,15 @@ the previous legacy-only ioctl caused journal flush errors `0x19` (ENOTTY).
 The prepared root is already on the phone; the repair needs a temporary kernel
 boot, not another root flash. These repairs are not yet hardware-verified.
 
+Integrated002 source `77fb6ae`, Actions39533922823 succeeded. Kernel SHA256
+`11dcc7a343fa742eda9f361093e500fe4c63f495da05691b2f2b89239d988bfb`;
+boot-image SHA256
+`5ffd63b2f60ef233841b690704138a77b266b781b6f603b2bb2ee41468e65b70`.
+Local integration compile, serialized policy types/mask and diagnostic isolation,
+and ASan/UBSan GPT/DMA/media-boundary checks passed. The repaired image was
+accepted by fastboot as a temporary boot; its screen result is pending. Existing
+root002 was retained and no partition was flashed again.
+
 The workflow is manual-only, has read-only repository permissions and a
 45-minute job limit. It does not contain Apple firmware or device dumps.
 
