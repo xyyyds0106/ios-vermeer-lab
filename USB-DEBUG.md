@@ -1,6 +1,12 @@
 # K70 USB debug console
 
 Experimental opt-in CDC ACM serial interface, integrated with the iOS profile.
+Hardware checkpoint2026-10-21: integrated004 (source `f0aec9c`,
+Actions39540409885) enumerated with Windows Usbser as COM6, streamed early
+kernel and Apple-service crash logs, and answered `status` through bulk OUT/IN.
+No USB errors appeared during that capture. This does not establish iOS GUI,
+panic-time transport or reconnect support after a physical disconnect.
+
 Boot with `vermeer_usb=1`. The default and diagnostic profiles do not start USB.
 Windows uses its built-in Usbser driver for CDC ACM (class02/subclass02).
 The laboratory VID/PID is1209:0001; synthetic serial `K70DBG004`.
