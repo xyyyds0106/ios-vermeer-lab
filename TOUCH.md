@@ -111,6 +111,11 @@ events and IRQ routing. It performs no MMIO in the USB callback. Route reasons a
 sampled before any SE/pin setup, so the next boot can distinguish their causes.
 
 This remains an unsupported GPI path, not completed touch/power bring-up.
+GPI route/reset snapshots are collected before checking FIFO depth or command
+idle, so active firmware and FIFO geometry cannot hide that evidence. Cleanup
+requires a positively sampled, idle SPI FIFO baseline with DMA/GSI disabled.
+Unknown/unmapped engines and FIFO-disabled GPI retain clocks even when MODE_EN,
+GSI_EVENT_EN and GENI_STATUS happen to be zero; idle does not confer ownership.
 **Reset high does not verify AVDD/IOVDD voltage
 or regulator ownership.** The candidate attempts to reuse the inherited rail
 state; it does not power up a controller left in reset or upload firmware.

@@ -40,7 +40,7 @@ static const unsigned vt_offsets[]={0x20,0x24,0x28,0x48,0x7c,0x224,0x22c,
 static struct {
     vm_offset_t se,gcc,gpio,smmu;
     uint32_t vote_added,pins[4],saved[VT_NREGS];
-    bool pins_saved,engine_saved,root_forced;
+    bool pins_saved,engine_saved,root_forced,fifo_owned;
     struct vg_bus bus;
     struct vt_info info;
     struct vt_frame contacts;
@@ -225,8 +225,6 @@ static int vt_engine_setup(void)
     os_atomic_store(&touch.inherited_rx_in,vt_rd(touch.se,0xd54),relaxed);
     printf("VERMEER TOUCH: SE4 firmware=%u TX=%08x RX=%08x reset=%08x interface=%08x\n",
         proto,tx,rx,vt_rd(touch.gpio,24*0x1000+4),interface);
-    if(proto!=1 || ((tx>>24)&63)!=32 || ((rx>>24)&63)!=32 ||
-       touch.bus.tx_depth<4 || touch.bus.rx_depth<4 || !vg_idle(&touch.bus))return 0;
     unsigned transport=vtr_transport(proto,interface,inherited_dma_mode,gsi_events,status);
     if(transport==VTR_TRANSPORT_GPI_REQUIRED) {
         touch.smmu=ml_io_map(0x15000000,0xd0000);
@@ -239,6 +237,11 @@ static int vt_engine_setup(void)
         return 0;
     }
     if(transport!=VTR_TRANSPORT_FIFO) {printf("VERMEER TOUCH: inherited DMA/GPI state not owned; FIFO refused\n");return 0;}
+    /* Establish ownership from the complete baseline before allowing clock
+     * cleanup. GPI diagnostics above must not depend on FIFO depth or idle. */
+    touch.fifo_owned=vtr_fifo_owned(1,proto,interface,inherited_dma_mode,gsi_events,status);
+    if(((tx>>24)&63)!=32 || ((rx>>24)&63)!=32 ||
+       touch.bus.tx_depth<4 || touch.bus.rx_depth<4 || !vg_idle(&touch.bus))return 0;
     /* ABL must already have the controller out of reset. Do not power-cycle
      * unknown rails or substitute an unverified reset/firmware sequence.
      */
@@ -279,7 +282,7 @@ static void vt_restore(void)
     /* If abort did not quiesce, leave clocks/registers retained until reboot.
      * Disabling an active engine could turn a recoverable error into a fault.
      */
-    if(os_atomic_load(&touch.gsi_events,relaxed) || !vtr_may_restore(os_atomic_load(&touch.inherited_dma_mode,relaxed),0,
+    if(!touch.fifo_owned || os_atomic_load(&touch.gsi_events,relaxed) || !vtr_may_restore(os_atomic_load(&touch.inherited_dma_mode,relaxed),0,
         touch.se?vt_rd(touch.se,VG_STATUS):0)) {
         printf("VERMEER TOUCH: unowned DMA or uncertain engine retained; no register/pin/clock restore\n");return;
     }

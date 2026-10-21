@@ -60,6 +60,12 @@ int main(void)
         else if(ifc&1)assert(transport==VTR_TRANSPORT_GPI_REQUIRED);
         else if(!mode && !events)assert(transport==VTR_TRANSPORT_FIFO);
         else assert(transport==VTR_TRANSPORT_REFUSED);
+        for(unsigned observed=0;observed<2;observed++) {
+            assert(vtr_fifo_owned(observed,proto,ifc,mode,events,0)==
+                (observed && transport==VTR_TRANSPORT_FIFO));
+            assert(!vtr_fifo_owned(observed,proto,ifc,mode,events,1));
+            assert(!vtr_fifo_owned(observed,proto,ifc,mode,events,0x1000));
+        }
     }
     assert(vtr_transport(1,0,0,0,1)==VTR_TRANSPORT_REFUSED);
     assert(vtr_transport(1,0,0,0,0x1000)==VTR_TRANSPORT_REFUSED);
@@ -79,5 +85,5 @@ int main(void)
     assert(!vtr_may_restore(0,1,0)); /* our failed DMA with idle command */
     assert(!vtr_may_restore(0,0,1));
     assert(!vtr_may_restore(0,0,0x1000));
-    puts("Touch route: unique SIDa3, SMMU geometry/stages/bounds, GPIO pad/latch, native DMA ranges PASS");
+    puts("Touch route: SIDa3/b6 isolation, GPI/FIFO ownership, SMMU bounds, GPIO and DMA ranges PASS");
 }

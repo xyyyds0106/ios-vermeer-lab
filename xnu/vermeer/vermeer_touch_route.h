@@ -38,6 +38,13 @@ static inline int vtr_may_restore(uint32_t inherited_dma,unsigned quarantined,ui
     /* Even M_ACTIVE=0 does not authorize changing an unowned DMA engine. */
     return !(inherited_dma&1u) && !quarantined && !(status&0x1001u);
 }
+static inline int vtr_fifo_owned(unsigned observed,unsigned protocol,uint32_t interface,
+    uint32_t dma_mode,uint32_t gsi_events,uint32_t status)
+{
+    /* Clock votes alone do not grant ownership. Unknown/unmapped engines,
+     * including an idle FIFO-disabled GPI engine, must retain resources. */
+    return observed && vtr_transport(protocol,interface,dma_mode,gsi_events,status)==VTR_TRANSPORT_FIFO;
+}
 static inline int vtr_identity_sid(void *ctx,uint32_t (*read)(void *,unsigned),unsigned sid,struct vtr_route *out)
 {
     if(!out || !read)return 0;
