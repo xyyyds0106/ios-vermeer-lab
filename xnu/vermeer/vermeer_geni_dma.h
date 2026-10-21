@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT
  * K70 GENI internal-DMA transfer core. Register facts: pinned MiCode GENI
- * source (53ef33eacdc4f7ac737451e4cfc91963d59e3956). Board integration pending.
+ * source (53ef33eacdc4f7ac737451e4cfc91963d59e3956).
  * No allocation, power changes, SMMU bypass or implicit buffer retirement.
  */
 #ifndef VERMEER_GENI_DMA_H
@@ -20,7 +20,7 @@ struct vg_dma {
     unsigned address_bits,quarantined;
     void *ctx;
     /* Must verify retained exclusive pages, this board's live DMA stream
-     * translation AND powered/deasserted-reset controller before each use.
+     * translation AND inherited controller/reset readiness before each use.
      * The core never creates that authorization from a DT address alone. */
     int (*authorize)(void *,uint64_t,uint64_t,size_t);
     /* Synchronous PoC operations with DSB on the issuing CPU. Whole dedicated

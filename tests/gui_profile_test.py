@@ -15,6 +15,8 @@ with tempfile.TemporaryDirectory() as folder:
     for name in ('0046-','0050-','0058-','0059-','0060-','0061-','0062-','0063-','0064-','0065-','0066-','0067-','0068-'):
         assert any(p.name.startswith(name) for p in profile.iterdir())
     assert '+++ b/bsd/dev/vermeer_touch.c' in all_patches
+    for name in ('vermeer_geni_dma.h','vermeer_touch_route.h'):
+        assert '+++ b/bsd/dev/'+name in all_patches
     assert '+++ b/bsd/dev/sweet_touch.c' not in all_patches
     nongui=folder/'nongui'
     subprocess.run([sys.executable,str(root/'tools/prepare_vermeer.py'),

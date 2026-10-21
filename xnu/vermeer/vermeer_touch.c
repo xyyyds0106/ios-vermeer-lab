@@ -1,6 +1,6 @@
 /* Experimental K70 GT9916 / GENI SPI SE4 physical input.
  * Only --ios-gui + vermeer_touch=1 + exact physical-model can enter here.
- * Fixed DT/official MiCode clock and pin contract; no DMA, PMIC/reset writes,
+ * Fixed DT/official MiCode clock and pin contract; no PMIC/reset writes,
  * firmware/config upload, storage access or arbitrary debug MMIO command.
  * Reuses controller firmware/power left by ABL; absent identity stops safely.
  */
@@ -8,6 +8,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <kern/clock.h>
+#include <kern/cpu_data.h>
 #include <kern/thread.h>
 #include <kern/sched_prim.h>
 #include <mach/thread_act.h>
@@ -15,10 +16,15 @@
 #include <machine/atomic.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
+#include <vm/pmap.h>
+#include <vm/vm_kern.h>
 #include "vermeer_geni_spi.h"
+#include "vermeer_geni_dma.h"
+#include "vermeer_touch_route.h"
 #include "vermeer_goodix_info.h"
 #include "vermeer_touch_clock.h"
 extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
+extern ppnum_t pmap_find_phys(pmap_t,addr64_t);
 extern void sweet_hid_touch(int,int,int,int);
 extern int sweet_hid_touch_ready(void);
 extern void vermeer_debug_input_register(void (*)(void));
@@ -37,10 +43,12 @@ static const unsigned vt_offsets[]={0x20,0x24,0x28,0x48,0x7c,0x224,0x22c,
     0x284,0x288,0x614,0x644,0x80c,0x810,0x814,0xe18,0xe1c,0xe30};
 #define VT_NREGS (sizeof(vt_offsets)/sizeof(vt_offsets[0]))
 static struct {
-    vm_offset_t se,gcc,gpio;
+    vm_offset_t se,gcc,gpio,smmu,dma_va;
     uint32_t vote_added,pins[4],saved[VT_NREGS];
-    bool pins_saved,engine_saved,root_forced;
+    bool pins_saved,engine_saved,root_forced,use_dma;
+    uint32_t dma_irq_saved[2];
     struct vg_bus bus;
+    struct vg_dma dma;
     struct vt_info info;
     struct vt_frame contacts;
     unsigned _Atomic stage;
@@ -49,8 +57,13 @@ static struct {
     uint32_t _Atomic clock_vote,clock_master,clock_slave,clock_se,clock_root,clock_cfg,clock_dfs;
     uint32_t _Atomic clock_core2x,clock_core;
     uint32_t _Atomic spi_phase,spi_irq,spi_status;
+    uint32_t _Atomic reset_cfg,reset_io,irq_cfg,irq_io;
+    uint32_t _Atomic route_reason,route_matches,route_slot,route_smr,route_s2cr,route_cbar,route_sctlr;
+    uint32_t _Atomic route_id0,route_id1,route_id2,route_cr0;
+    uint32_t _Atomic dma_enabled,dma_retained,dma_tx_status,dma_rx_status;
+    uint32_t _Atomic inherited_dma_mode,inherited_tx_in,inherited_rx_in;
     uint8_t tx[1032],rx[1032];
-} touch;
+} touch={.route_reason=VTR_UNSAMPLED};
 enum { VT_WAIT=1,VT_CLOCK,VT_FIRMWARE,VT_IDENTITY,VT_READY,VT_STOPPED };
 static uint32_t vt_rd(vm_offset_t base,unsigned reg)
 {
@@ -86,6 +99,100 @@ static void vt_status(void)
         os_atomic_load(&touch.clock_root,relaxed),os_atomic_load(&touch.clock_cfg,relaxed),os_atomic_load(&touch.clock_dfs,relaxed));
     printf("VERMEER TOUCH: spi-snapshot phase=%u irq=%08x status=%08x\n",
         os_atomic_load(&touch.spi_phase,relaxed),os_atomic_load(&touch.spi_irq,relaxed),os_atomic_load(&touch.spi_status,relaxed));
+    printf("VERMEER TOUCH: gpio-snapshot reset-cfg=%08x reset-io=%08x irq-cfg=%08x irq-io=%08x\n",
+        os_atomic_load(&touch.reset_cfg,relaxed),os_atomic_load(&touch.reset_io,relaxed),
+        os_atomic_load(&touch.irq_cfg,relaxed),os_atomic_load(&touch.irq_io,relaxed));
+    printf("VERMEER TOUCH: SIDa3 layout=%08x/%08x/%08x cr0=%08x reason=%u matches=%u slot=%u smr=%08x s2cr=%08x cbar=%08x sctlr=%08x\n",
+        os_atomic_load(&touch.route_id0,relaxed),os_atomic_load(&touch.route_id1,relaxed),
+        os_atomic_load(&touch.route_id2,relaxed),os_atomic_load(&touch.route_cr0,relaxed),
+        os_atomic_load(&touch.route_reason,relaxed),os_atomic_load(&touch.route_matches,relaxed),
+        os_atomic_load(&touch.route_slot,relaxed),os_atomic_load(&touch.route_smr,relaxed),
+        os_atomic_load(&touch.route_s2cr,relaxed),os_atomic_load(&touch.route_cbar,relaxed),os_atomic_load(&touch.route_sctlr,relaxed));
+    printf("VERMEER TOUCH: DMA enabled=%u quarantined=%u tx-status=%08x rx-status=%08x inherited-mode=%08x tx-in=%08x rx-in=%08x\n",
+        os_atomic_load(&touch.dma_enabled,relaxed),os_atomic_load(&touch.dma_retained,relaxed),
+        os_atomic_load(&touch.dma_tx_status,relaxed),os_atomic_load(&touch.dma_rx_status,relaxed),
+        os_atomic_load(&touch.inherited_dma_mode,relaxed),os_atomic_load(&touch.inherited_tx_in,relaxed),
+        os_atomic_load(&touch.inherited_rx_in,relaxed));
+}
+static int vt_reset_ready(void)
+{
+    uint32_t cfg=vt_rd(touch.gpio,24*0x1000),io=vt_rd(touch.gpio,24*0x1000+4);
+    os_atomic_store(&touch.reset_cfg,cfg,relaxed);os_atomic_store(&touch.reset_io,io,relaxed);
+    os_atomic_store(&touch.irq_cfg,vt_rd(touch.gpio,25*0x1000),relaxed);
+    os_atomic_store(&touch.irq_io,vt_rd(touch.gpio,25*0x1000+4),relaxed);
+    return vtr_reset_high(cfg,io);
+}
+static uint32_t vt_smmu_read(void *ctx,unsigned reg)
+{(void)ctx;return vt_rd(touch.smmu,reg);}
+static int vt_route_ready(void)
+{
+    struct vtr_route r;
+    int ok=vtr_identity(NULL,vt_smmu_read,&r);
+#define VT_ROUTE_SAVE(field) os_atomic_store(&touch.route_##field,r.field,relaxed)
+    VT_ROUTE_SAVE(reason);VT_ROUTE_SAVE(matches);VT_ROUTE_SAVE(slot);VT_ROUTE_SAVE(smr);
+    VT_ROUTE_SAVE(s2cr);VT_ROUTE_SAVE(cbar);VT_ROUTE_SAVE(sctlr);VT_ROUTE_SAVE(id0);
+    VT_ROUTE_SAVE(id1);VT_ROUTE_SAVE(id2);VT_ROUTE_SAVE(cr0);
+#undef VT_ROUTE_SAVE
+    return ok;
+}
+static int vt_dma_authorize(void *ctx,uint64_t tx,uint64_t rx,size_t page)
+{
+    (void)ctx;
+    if(!touch.dma_va || page!=PAGE_SIZE || !vtr_dma_range(tx,2*page,page) ||
+       rx!=tx+page || touch.dma.quarantined || !vt_reset_ready() || !vt_route_ready())return 0;
+    /* Recheck the exclusively retained kernel pages before every publication.
+     * Existing identity routes are observed only; no SMR/S2CR/table writes. */
+    for(unsigned i=0;i<2;i++) {
+        ppnum_t pn=pmap_find_phys(kernel_pmap,(addr64_t)(touch.dma_va+i*page));
+        if(!pn || ptoa_64(pn)!=tx+i*page)return 0;
+    }
+    return 1;
+}
+static int vt_dma_cache(void *p,size_t n,unsigned op)
+{
+    if(n!=PAGE_SIZE || (p!=touch.dma.tx && p!=touch.dma.rx) ||
+       ((uintptr_t)p&PAGE_MASK) || op>2)return 0;
+    disable_preemption();
+    uint64_t ctr;__asm__ volatile("mrs %0, ctr_el0":"=r"(ctr));
+    size_t line=(size_t)4<<((ctr>>16)&15);
+    if(line>4096) {enable_preemption();return 0;}
+    uintptr_t end=(uintptr_t)p+n;
+    __asm__ volatile("dsb sy":::"memory");
+    for(uintptr_t a=(uintptr_t)p;a<end;a+=line) {
+        if(op==0)__asm__ volatile("dc cvac, %0"::"r"(a):"memory");
+        else if(op==1)__asm__ volatile("dc civac, %0"::"r"(a):"memory");
+        else __asm__ volatile("dc ivac, %0"::"r"(a):"memory");
+    }
+    __asm__ volatile("dsb sy":::"memory");enable_preemption();return 1;
+}
+static int vt_dma_clean(void *ctx,void *p,size_t n){(void)ctx;return vt_dma_cache(p,n,0);}
+static int vt_dma_clean_invalidate(void *ctx,void *p,size_t n){(void)ctx;return vt_dma_cache(p,n,1);}
+static int vt_dma_invalidate(void *ctx,void *p,size_t n){(void)ctx;return vt_dma_cache(p,n,2);}
+static int vt_dma_prepare(void)
+{
+    if(PAGE_SIZE!=16384 || !vt_route_ready() || !vt_reset_ready())return 0;
+    if(kmem_alloc_contig(kernel_map,&touch.dma_va,2*PAGE_SIZE,PAGE_MASK,0,0,
+        KMA_DATA|KMA_ZERO|KMA_PERMANENT,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return 0;
+    ppnum_t pn=pmap_find_phys(kernel_pmap,(addr64_t)touch.dma_va);
+    if(!pn || !vtr_dma_range(ptoa_64(pn),2*PAGE_SIZE,PAGE_SIZE))return 0;
+    touch.dma=(struct vg_dma){.tx=(uint8_t *)touch.dma_va,.rx=(uint8_t *)(touch.dma_va+PAGE_SIZE),
+        .tx_pa=ptoa_64(pn),.rx_pa=ptoa_64(pn)+PAGE_SIZE,.page_bytes=PAGE_SIZE,.address_bits=36,
+        .authorize=vt_dma_authorize,.clean=vt_dma_clean,.clean_invalidate=vt_dma_clean_invalidate,
+        .invalidate=vt_dma_invalidate};
+    return vt_dma_authorize(NULL,touch.dma.tx_pa,touch.dma.rx_pa,PAGE_SIZE);
+}
+static int vt_transfer(unsigned n)
+{
+    int ok=touch.use_dma?vgd_transfer(&touch.bus,&touch.dma,touch.tx,touch.rx,n):
+        vg_transfer(&touch.bus,touch.tx,touch.rx,n);
+    os_atomic_store(&touch.spi_phase,touch.bus.phase,relaxed);os_atomic_store(&touch.spi_irq,touch.bus.last_irq,relaxed);
+    os_atomic_store(&touch.spi_status,touch.bus.last_status,relaxed);
+    if(touch.use_dma) {
+        os_atomic_store(&touch.dma_retained,touch.dma.quarantined,relaxed);
+        os_atomic_store(&touch.dma_tx_status,touch.dma.last_tx,relaxed);
+        os_atomic_store(&touch.dma_rx_status,touch.dma.last_rx,relaxed);
+    }
+    return ok;
 }
 static void vt_emit_hid(void *ctx,unsigned id,int down,unsigned x,unsigned y)
 {
@@ -98,9 +205,7 @@ static int vt_spi_read(uint32_t addr,uint8_t *out,unsigned n)
     bzero(touch.tx,n+8);touch.tx[0]=0xf1;
     for(unsigned i=0;i<4;i++)touch.tx[1+i]=(uint8_t)(addr>>(24-i*8));
     touch.tx[5]=touch.tx[6]=touch.tx[7]=0xff;
-    int ok=vg_transfer(&touch.bus,touch.tx,touch.rx,n+8);
-    os_atomic_store(&touch.spi_phase,touch.bus.phase,relaxed);os_atomic_store(&touch.spi_irq,touch.bus.last_irq,relaxed);
-    os_atomic_store(&touch.spi_status,touch.bus.last_status,relaxed);
+    int ok=vt_transfer(n+8);
     if(!ok)return 0;
     bcopy(touch.rx+8,out,n);os_atomic_inc(&touch.transactions,relaxed);return 1;
 }
@@ -112,9 +217,7 @@ static int vt_ack_event(void)
     uint32_t addr=touch.info.event;touch.tx[0]=0xf0;
     for(unsigned i=0;i<4;i++)touch.tx[i+1]=(uint8_t)(addr>>(24-i*8));
     touch.tx[5]=0;
-    int ok=vg_transfer(&touch.bus,touch.tx,touch.rx,6);
-    os_atomic_store(&touch.spi_phase,touch.bus.phase,relaxed);os_atomic_store(&touch.spi_irq,touch.bus.last_irq,relaxed);
-    os_atomic_store(&touch.spi_status,touch.bus.last_status,relaxed);
+    int ok=vt_transfer(6);
     if(!ok)return 0;
     os_atomic_inc(&touch.transactions,relaxed);return 1;
 }
@@ -156,18 +259,38 @@ static int vt_engine_setup(void)
     uint32_t tx=vt_rd(touch.se,0xe24),rx=vt_rd(touch.se,0xe28);
     touch.bus.tx_depth=(tx>>16)&255u;touch.bus.rx_depth=(rx>>16)&255u;
     uint32_t interface=vt_rd(touch.se,0x64);
+    uint32_t inherited_dma_mode=vt_rd(touch.se,0x258);
+    os_atomic_store(&touch.inherited_dma_mode,inherited_dma_mode,relaxed);
+    os_atomic_store(&touch.inherited_tx_in,vt_rd(touch.se,0xc54),relaxed);
+    os_atomic_store(&touch.inherited_rx_in,vt_rd(touch.se,0xd54),relaxed);
     printf("VERMEER TOUCH: SE4 firmware=%u TX=%08x RX=%08x reset=%08x interface=%08x\n",
         proto,tx,rx,vt_rd(touch.gpio,24*0x1000+4),interface);
     if(proto!=1 || ((tx>>24)&63)!=32 || ((rx>>24)&63)!=32 ||
        touch.bus.tx_depth<4 || touch.bus.rx_depth<4 || !vg_idle(&touch.bus))return 0;
-    if(interface&1u){printf("VERMEER TOUCH: FIFO interface disabled; DMA transport required\n");return 0;}
+    touch.use_dma=(interface&1u)!=0;
+    if(touch.use_dma) {
+        touch.smmu=ml_io_map(0x15000000,0xd0000);
+        if(!touch.smmu)return 0;
+        /* Sample both causes even when reset is low, before any SE/pin edits. */
+        int route=vt_route_ready(),reset=vt_reset_ready();
+        /* An idle command bit is insufficient to take over another owner's
+         * internal/GPI DMA configuration. Never reset it to force ownership. */
+        if(inherited_dma_mode&1u) {
+            printf("VERMEER TOUCH: inherited DMA mode already enabled; ownership unavailable\n");return 0;
+        }
+        if(!route || !reset) {
+            printf("VERMEER TOUCH: DMA board preflight refused route=%d reset-high=%d; rails unchanged\n",route,reset);
+            return 0;
+        }
+        if(!vt_dma_prepare()) {printf("VERMEER TOUCH: DMA native-page ownership guard refused\n");return 0;}
+    }
     /* ABL must already have the controller out of reset. Do not power-cycle
      * unknown rails or substitute an unverified reset/firmware sequence.
      */
-    uint32_t reset=vt_rd(touch.gpio,24*0x1000),level=vt_rd(touch.gpio,24*0x1000+4);
-    if(((reset&0x200u) && !(level&2u)) || (!(reset&0x200u) && !(level&1u)))return 0;
+    if(!vt_reset_ready()) {printf("VERMEER TOUCH: inherited reset pad not high; power/reset setup required\n");return 0;}
     for(unsigned i=0;i<VT_NREGS;i++)touch.saved[i]=vt_rd(touch.se,vt_offsets[i]);
     touch.engine_saved=true;
+    touch.dma_irq_saved[0]=vt_rd(touch.se,0xc48);touch.dma_irq_saved[1]=vt_rd(touch.se,0xd48);
     for(unsigned i=0;i<4;i++) {
         unsigned reg=(44+i)*0x1000;touch.pins[i]=vt_rd(touch.gpio,reg);
         /* Exact active DT: ALT1, 6mA; pulldown MISO/MOSI/SCLK, pullup CS. */
@@ -176,7 +299,7 @@ static int vt_engine_setup(void)
     }
     touch.pins_saved=true;
     vt_wr(touch.se,0x614,0);vt_wr(touch.se,0x644,0);vt_wr(touch.se,0xe1c,0);
-    vt_wr(touch.se,0xe18,0);vt_wr(touch.se,0x258,0); /* FIFO, no GPI/DMA */
+    vt_wr(touch.se,0xe18,0);vt_wr(touch.se,0x258,touch.use_dma?1:0); /* internal DMA or FIFO, never GPI */
     vt_wr(touch.se,0x28,vt_rd(touch.se,0x28)|0x7f);
     vt_wr(touch.se,0xe30,vt_rd(touch.se,0xe30)|0xf);
     vt_wr(touch.se,0x24,0x7f);vt_wr(touch.se,0x20,1);
@@ -195,6 +318,10 @@ static int vt_engine_setup(void)
      */
     vt_wr(touch.se,0x7c,0);vt_wr(touch.se,0x48,(128u<<4)|1u);
     vg_wr(&touch.bus,VG_CLEAR,0xffffffffu);
+    if(touch.use_dma) {
+        vg_wr(&touch.bus,VGD_TX+VGD_CLEAR,0xffffffffu);vg_wr(&touch.bus,VGD_RX+VGD_CLEAR,0xffffffffu);
+        os_atomic_store(&touch.dma_enabled,1,relaxed);
+    }
     return 1;
 }
 static void vt_restore(void)
@@ -202,13 +329,21 @@ static void vt_restore(void)
     /* If abort did not quiesce, leave clocks/registers retained until reboot.
      * Disabling an active engine could turn a recoverable error into a fault.
      */
-    if(touch.se && (vt_rd(touch.se,VG_STATUS)&0x1001u)) {
-        printf("VERMEER TOUCH: active engine retained after timeout; no further transfers\n");return;
+    if(!vtr_may_restore(os_atomic_load(&touch.inherited_dma_mode,relaxed),touch.dma.quarantined,
+        touch.se?vt_rd(touch.se,VG_STATUS):0)) {
+        printf("VERMEER TOUCH: unowned DMA or uncertain engine retained; no register/pin/clock restore\n");return;
     }
     if(touch.engine_saved) {
+        if(touch.use_dma) {
+            /* Finished descriptors only. IRQ-enable restore uses W1C/W1S,
+             * never writes a DMA LEN register (which would launch DMA). */
+            vt_wr(touch.se,0xc50,0xffffffffu);vt_wr(touch.se,0xd50,0xffffffffu);
+            vt_wr(touch.se,0xc4c,touch.dma_irq_saved[0]);vt_wr(touch.se,0xd4c,touch.dma_irq_saved[1]);
+        }
         vt_wr(touch.se,0x20,1); /* inactive chip select after a cancelled transfer */
         vg_wr(&touch.bus,VG_CLEAR,0xffffffffu);vt_wr(touch.se,0x648,0xffffffffu);
         for(unsigned i=0;i<VT_NREGS;i++)vt_wr(touch.se,vt_offsets[i],touch.saved[i]);
+        os_atomic_store(&touch.dma_enabled,0,relaxed);
     }
     if(touch.pins_saved)for(unsigned i=0;i<4;i++)vt_wr(touch.gpio,(44+i)*0x1000,touch.pins[i]);
     if(touch.gcc && touch.root_forced)vt_wr(touch.gcc,VT_RCG,vt_rd(touch.gcc,VT_RCG)&~2u);
@@ -242,7 +377,7 @@ static void vt_thread(void *arg,wait_result_t result)
     os_atomic_store(&touch.stage,VT_IDENTITY,relaxed);
     if(!vt_identify())goto stopped;
     os_atomic_store(&touch.stage,VT_READY,relaxed);
-    printf("VERMEER TOUCH: physical GT9916 input ready (SPI FIFO, no firmware upload)\n");
+    printf("VERMEER TOUCH: physical GT9916 input ready (SPI %s, no firmware upload)\n",touch.use_dma?"DMA":"FIFO");
     unsigned consecutive_bad=0;
     for(;;) {
         uint8_t packet[90];

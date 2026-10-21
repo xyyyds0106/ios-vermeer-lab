@@ -1,0 +1,46 @@
+name: GPU and touch host checks
+on:
+  push:
+    paths:
+      - 'gpu/**'
+      - 'tests/gpu/**'
+      - 'tests/*touch*'
+      - 'tests/*geni*'
+      - 'tests/goodix_packet_test.c'
+      - 'tests/gui_profile_test.py'
+      - 'xnu/vermeer/vermeer_touch*'
+      - 'xnu/vermeer/vermeer_geni*'
+      - 'xnu/vermeer/vermeer_goodix*'
+      - 'xnu/vermeer/0067-*'
+      - 'tools/prepare_vermeer.py'
+      - '.github/workflows/gpu-touch-checks.yml'
+  pull_request:
+    paths:
+      - 'gpu/**'
+      - 'tests/gpu/**'
+      - 'tests/*touch*'
+      - 'tests/*geni*'
+      - 'tests/goodix_packet_test.c'
+      - 'tests/gui_profile_test.py'
+      - 'xnu/vermeer/vermeer_touch*'
+      - 'xnu/vermeer/vermeer_geni*'
+      - 'xnu/vermeer/vermeer_goodix*'
+      - 'xnu/vermeer/0067-*'
+      - 'tools/prepare_vermeer.py'
+      - '.github/workflows/gpu-touch-checks.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: GPU memory and touch route/transport regressions
+        env:
+          CC: clang
+          CXX: clang++
+        run: sh tests/run-gpu-touch-tests.sh
+      - name: GUI and non-GUI packaging isolation
+        run: python3 tests/gui_profile_test.py
