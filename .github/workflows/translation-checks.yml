@@ -1,0 +1,24 @@
+name: Buffer fill translation host checks
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/translation-checks.yml
+      - gpu/translation/**
+      - gpu/AdrenoPM4/**
+      - tests/translation/**
+  pull_request:
+    paths:
+      - .github/workflows/translation-checks.yml
+      - gpu/translation/**
+      - gpu/AdrenoPM4/**
+      - tests/translation/**
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: CC=clang sh tests/translation/run-fill-tests.sh
