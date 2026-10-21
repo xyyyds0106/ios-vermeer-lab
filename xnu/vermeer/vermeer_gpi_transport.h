@@ -11,6 +11,37 @@ enum { VGPT_CLEAN,VGPT_CLEAN_INVALIDATE,VGPT_INVALIDATE };
 enum { VGPT_OK,VGPT_INVALID,VGPT_LEASE,VGPT_IO,VGPT_STATE,VGPT_TIMEOUT,
        VGPT_CACHE,VGPT_EVENT,VGPT_CLOCK,VGPT_RETIRED };
 enum { VGPT_NEW,VGPT_STARTING,VGPT_READY,VGPT_TRANSFER,VGPT_QUARANTINE };
+enum {VGPT_TRACE_POINTERS=1,VGPT_TRACE_COPY,VGPT_TRACE_CACHE_TX,VGPT_TRACE_CACHE_RX,
+      VGPT_TRACE_CACHE_TR,VGPT_TRACE_CACHE_RR,VGPT_TRACE_RX_DB,VGPT_TRACE_TX_DB,
+      VGPT_TRACE_POLL,VGPT_TRACE_EVENTS,VGPT_TRACE_RX_ACQUIRE,VGPT_TRACE_COMPLETE};
+/* The exact CURRENT boot FDT must first match board_contract.h, including
+ * GIC cells/parent and the COMPLETE Apps-SMMU/GPI/SE4 interrupts properties.
+ * These are read-only GICD offsets; no mask/clear/routing operation exists.
+ * Sources: GPII0 SPI279, SE4 SPI357, Apps global SPI65, context index bank+1. */
+struct vgpt_irq_observation {unsigned source,intid,offset;uint32_t enabled,active;};
+static inline int vgpt_irqs_masked(void *ctx,int (*read)(void *,unsigned,uint32_t *),
+    unsigned bank,struct vgpt_irq_observation *out)
+{
+    static const unsigned context_spi[70]={97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,
+        113,114,115,116,117,118,181,182,183,184,185,186,187,188,189,190,191,192,315,316,317,318,
+        319,320,321,322,323,324,325,326,327,328,329,330,331,332,333,334,335,336,337,338,
+        339,340,341,342,343,344,345,395,396,397,398,399};
+    struct vgpt_irq_observation r={0};uint32_t typer=0;
+    if(!read || !out || bank>70)return 0;
+    r.offset=4;
+    if(!read(ctx,4,&typer)){*out=r;return 0;}
+    unsigned implemented=32*((typer&31)+1),spi[4]={279,357,65,bank<70?context_spi[bank]:0};
+    for(unsigned i=0;i<(bank<70?4u:3u);i++) {
+        r=(struct vgpt_irq_observation){.source=i+1,.intid=spi[i]+32};
+        if(r.intid>=implemented){*out=r;return 0;}
+        r.offset=0x100+4*(r.intid/32);
+        if(!read(ctx,r.offset,&r.enabled)){*out=r;return 0;}
+        r.offset=0x300+4*(r.intid/32);
+        if(!read(ctx,r.offset,&r.active)){*out=r;return 0;}
+        if((r.enabled|r.active)&(1u<<(r.intid%32))){*out=r;return 0;}
+    }
+    *out=(struct vgpt_irq_observation){0};return 1;
+}
 struct vgpt_page {void *cpu;uint64_t iova;};
 struct vgpt_ops {
     void *ctx;
@@ -21,11 +52,13 @@ struct vgpt_ops {
     int (*now_us)(void *,uint64_t *); /* current monotonic time, read-only */
     int (*pause_us)(void *,unsigned);
     int (*serial_idle)(void *); /* 1 idle, 0 active, -1 fault */
+    void (*checkpoint)(void *,unsigned); /* optional first-exchange RAM trace, no MMIO */
 };
 struct vgpt {
     struct vgpt_ops io;struct vgpt_page page[VGPT_PAGES];
     unsigned phase,active_phase,error,quarantined,hardware_touched,tx_wp,rx_wp,ev_rp;
     unsigned last_channel,last_code,last_status,last_length,events,commands;
+    unsigned checkpoint,exchanges;
     uint64_t begin,last,budget,command_begin;unsigned command_budget;
 };
 static inline int vgpt_fail(struct vgpt *g,unsigned error)
@@ -66,6 +99,12 @@ static inline int vgpt_pause(struct vgpt *g)
 {
     if(!vgpt_guard(g))return 0;
     if(g->io.pause_us(g->io.ctx,20)!=1)return vgpt_fail(g,VGPT_IO);
+    return vgpt_guard(g);
+}
+static inline int vgpt_mark(struct vgpt *g,unsigned checkpoint)
+{
+    g->checkpoint=checkpoint;
+    if(!g->exchanges && g->io.checkpoint)g->io.checkpoint(g->io.ctx,checkpoint);
     return vgpt_guard(g);
 }
 static inline int vgpt_valid(const struct vgpt *g)
@@ -186,6 +225,7 @@ static inline int vgpt_exchange(struct vgpt *g,const uint8_t *tx,uint8_t *rx,uns
     g->last=g->begin=now;g->budget=100000;g->phase=g->active_phase=VGPT_TRANSFER;
     struct vgp_spi_plan plan;
     if(!vgp_spi_plan(&plan,g->page[VGPT_TX].iova,g->page[VGPT_RX].iova,count,clock_source,divider))return vgpt_fail(g,VGPT_INVALID);
+    if(!vgpt_mark(g,VGPT_TRACE_POINTERS))return 0;
     unsigned index;
     if(!vgpt_pointer(g,0x10010,VGPT_TR,1024,&index))return 0;
     if(index!=g->tx_wp)return vgpt_fail(g,VGPT_STATE);
@@ -193,19 +233,24 @@ static inline int vgpt_exchange(struct vgpt *g,const uint8_t *tx,uint8_t *rx,uns
     if(index!=g->rx_wp)return vgpt_fail(g,VGPT_STATE);
     if(!vgpt_pointer(g,0x11010,VGPT_ER,4096,&index))return 0;
     if(index!=g->ev_rp)return vgpt_fail(g,VGPT_EVENT);
+    if(!vgpt_mark(g,VGPT_TRACE_COPY))return 0;
     for(unsigned i=0;i<count;i++)((uint8_t *)g->page[VGPT_TX].cpu)[i]=tx[i];
     unsigned tx_end=(g->tx_wp+2)&63,rx_end=g->rx_wp;
     for(unsigned i=0;i<3;i++)((struct vgp_tre *)g->page[VGPT_TR].cpu)[(g->tx_wp+i)&63]=plan.tx[i];
     ((struct vgp_tre *)g->page[VGPT_RR].cpu)[g->rx_wp]=plan.rx;
-    if(!vgpt_cache(g,VGPT_TX,VGPT_CLEAN) || !vgpt_cache(g,VGPT_RX,VGPT_CLEAN_INVALIDATE) ||
-       !vgpt_cache(g,VGPT_TR,VGPT_CLEAN) || !vgpt_cache(g,VGPT_RR,VGPT_CLEAN))return 0;
+    if(!vgpt_mark(g,VGPT_TRACE_CACHE_TX) || !vgpt_cache(g,VGPT_TX,VGPT_CLEAN) ||
+       !vgpt_mark(g,VGPT_TRACE_CACHE_RX) || !vgpt_cache(g,VGPT_RX,VGPT_CLEAN_INVALIDATE) ||
+       !vgpt_mark(g,VGPT_TRACE_CACHE_TR) || !vgpt_cache(g,VGPT_TR,VGPT_CLEAN) ||
+       !vgpt_mark(g,VGPT_TRACE_CACHE_RR) || !vgpt_cache(g,VGPT_RR,VGPT_CLEAN))return 0;
     g->tx_wp=(g->tx_wp+3)&63;g->rx_wp=(g->rx_wp+1)&63;
-    if(!vgpt_wr(g,0x12008,(uint32_t)(g->page[VGPT_RR].iova+16*g->rx_wp)) ||
-       !vgpt_wr(g,0x12000,(uint32_t)(g->page[VGPT_TR].iova+16*g->tx_wp)))return 0;
+    if(!vgpt_mark(g,VGPT_TRACE_RX_DB) || !vgpt_wr(g,0x12008,(uint32_t)(g->page[VGPT_RR].iova+16*g->rx_wp)) ||
+       !vgpt_mark(g,VGPT_TRACE_TX_DB) || !vgpt_wr(g,0x12000,(uint32_t)(g->page[VGPT_TR].iova+16*g->tx_wp)))return 0;
+    if(!vgpt_mark(g,VGPT_TRACE_POLL))return 0;
     unsigned done=0,processed=0;
     for(unsigned poll=0;poll<5000;poll++) {
         if(!vgpt_errors(g) || !vgpt_pointer(g,0x11010,VGPT_ER,4096,&index))return 0;
         if(index!=g->ev_rp) {
+            if(!vgpt_mark(g,VGPT_TRACE_EVENTS))return 0;
             if(!vgpt_cache(g,VGPT_ER,VGPT_INVALIDATE))return 0;
             while(index!=g->ev_rp) {
                 if(++processed>255)return vgpt_fail(g,VGPT_EVENT);
@@ -232,9 +277,10 @@ static inline int vgpt_exchange(struct vgpt *g,const uint8_t *tx,uint8_t *rx,uns
                 if(index!=g->tx_wp)return vgpt_fail(g,VGPT_STATE);
                 if(!vgpt_pointer(g,0x10090,VGPT_RR,1024,&index))return 0;
                 if(index!=g->rx_wp)return vgpt_fail(g,VGPT_STATE);
-                if(!vgpt_cache(g,VGPT_RX,VGPT_INVALIDATE) || !vgpt_guard(g))return 0;
+                if(!vgpt_mark(g,VGPT_TRACE_RX_ACQUIRE) || !vgpt_cache(g,VGPT_RX,VGPT_INVALIDATE) || !vgpt_guard(g))return 0;
+                if(!vgpt_mark(g,VGPT_TRACE_COMPLETE))return 0;
                 for(unsigned i=0;i<count;i++)rx[i]=((uint8_t *)g->page[VGPT_RX].cpu)[i];
-                g->phase=g->active_phase=VGPT_READY;return 1;
+                ++g->exchanges;g->phase=g->active_phase=VGPT_READY;return 1;
             }
         }
         if(!vgpt_pause(g))return 0;

@@ -35,3 +35,23 @@ with tempfile.TemporaryDirectory() as tmp:
     fdt=Path(sys.argv[1]) if len(sys.argv)==2 else synthetic
     subprocess.run([str(out/'native'),str(fdt)],check=True,
         env={**os.environ,'UBSAN_OPTIONS':'halt_on_error=1'})
+    # Fixed interrupt cells alone cannot authorize a different IRQ parent or
+    # nexus. Exercise the production gate with well-formed alternate trees.
+    irq_paths=('/', '/soc', '/soc/apps-smmu@15000000',
+        '/soc/qcom,gpi-dma@a00000', '/soc/qcom,qupv3_1_geni_se@ac0000',
+        '/soc/qcom,qupv3_1_geni_se@ac0000/spi@a90000')
+    cases=0
+    for path in irq_paths:
+        for key,value,expected in (
+            ('interrupt-parent',bytes.fromhex('00000001'),0),
+            ('interrupt-parent',bytes.fromhex('00000002'),18),
+            ('interrupt-parent',b'',18),
+            ('interrupts-extended',bytes(16),18),
+            ('interrupt-map',b'',18),
+            ('interrupt-map-mask',bytes(4),18)):
+            changed=out/'irq-override.dtb'
+            changed.write_bytes(fixture(((path,key,value),)))
+            subprocess.run([str(out/'native'),str(changed),str(expected)],check=True,
+                env={**os.environ,'UBSAN_OPTIONS':'halt_on_error=1'})
+            cases+=1
+    print(f'Native FDT IRQ ancestry: {cases} parent/nexus override cases PASS',flush=True)

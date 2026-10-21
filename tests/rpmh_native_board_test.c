@@ -143,7 +143,11 @@ static uint8_t *read_fdt(const char *path,size_t *bytes)
 }
 int main(int argc,char **argv)
 {
-    assert(argc==2);size_t bytes;uint8_t *fdt=read_fdt(argv[1],&bytes);
+    assert(argc==2 || argc==3);size_t bytes;uint8_t *fdt=read_fdt(argv[1],&bytes);
+    if(argc==3) {
+        assert(vrb_dt_check(fdt,bytes)==atoi(argv[2]));
+        free(fdt);return 0;
+    }
     for(unsigned rev=0;rev<2;rev++) {
         reset(rev?0x300:0x207);
         hw.boot_fdt=fdt;hw.boot_fdt_bytes=(unsigned)bytes;

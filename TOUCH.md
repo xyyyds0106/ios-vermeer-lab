@@ -214,6 +214,18 @@ recipe compilation and actual ARM64 object inspection are separate checks.
 These fixtures do not prove physical DMA, cache coherence or input; native
 synchronous external MMIO aborts are not recovered by the callback tests.
 
+GUI018 hardware logs reached SMMU bank69/slot6 and completed GPI startup,
+then USB disconnected during the first SPI identity request without a captured
+panic. The cause remains unknown. The next diagnostic checks the current
+boot's complete GPI/SE4/Apps-SMMU IRQ properties and inherited GIC parent before
+accepting its power lease. It reads GIC enable/active state before ownership
+and throughout transfers, refusing an enabled or active relevant source without
+masking, clearing or rerouting it. First-exchange checkpoints bracket the clock
+selector read, ring/cache work, doorbells and completion. Logging does not
+extend the exchange deadline. Host tests include all supported context IRQs,
+revocation/timeouts at every checkpoint, and valid/malformed IRQ ancestry.
+These are diagnostic guards, not evidence that the SPI failure is fixed.
+
 The GUI build registers two shared SMMU C objects (`vermeer_touch_smmu_tables.c`
 and `vermeer_touch_smmu_context.c`). GPU integration must reuse their exported
 ArmSmmu4K symbols instead of linking duplicate copies of the same sources.

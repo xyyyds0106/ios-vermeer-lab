@@ -6,6 +6,29 @@
 #define VERMEER_TOUCH_GPI_NATIVE_H
 static const struct vtp_ops *_Atomic vtg_power_provider;
 static unsigned _Atomic vtg_owner;
+static vm_offset_t vtg_gic;
+static unsigned vtg_irq_retired;
+static struct vgpt_irq_observation vtg_irq_last;
+static int vtg_irq_read(void *ctx,unsigned off,uint32_t *out)
+{
+    (void)ctx;if(!vtg_gic || !out || (off&3) || off>=0x10000)return 0;
+    *out=vt_rd(vtg_gic,off);return 1;
+}
+static int vtg_irqs_ready(void)
+{
+    if(vtg_irq_retired || !vtg_gic || !touch.power_held || !touch.power ||
+       touch.power->valid(touch.power->ctx)!=1)return 0;
+    /* That registered board lease exists only after checking this boot's
+     * full fixed FDT IRQ contract, not merely the saved host reference. */
+    unsigned bank=70;
+    if(touch.identity_mapping && !((touch.identity_route.s2cr>>16)&3))bank=touch.identity_route.s2cr&255;
+    else if(touch.iommu.scan_phase>=4)bank=touch.iommu.bank;
+    if(vgpt_irqs_masked(NULL,vtg_irq_read,bank,&vtg_irq_last))return 1;
+    vtg_irq_retired=1;
+    printf("VERMEER TOUCH IRQ: refused source=%u INTID=%u GICD-offset=%x enabled=%08x active=%08x; no mask/clear/route writes\n",
+        vtg_irq_last.source,vtg_irq_last.intid,vtg_irq_last.offset,vtg_irq_last.enabled,vtg_irq_last.active);
+    return 0;
+}
 int vermeer_touch_power_register(const struct vtp_ops *ops)
 {
     if(!ops || !ops->acquire || !ops->valid || os_atomic_load(&vtg_owner,acquire))return 0;
@@ -74,7 +97,7 @@ static int vtg_power_valid(void)
 static int vtg_quiet(void *ctx)
 {
     (void)ctx;
-    if(!touch.gpi || !touch.se || !vtg_clock_ready() || !vtg_power_valid() ||
+    if(!touch.gpi || !touch.se || !vtg_clock_ready() || !vtg_power_valid() || !vtg_irqs_ready() ||
        (touch.dma_va && !vtg_pages()) || (vt_rd(touch.se,VG_STATUS)&0x1001))return 0;
     /* Pinned provider assigns Apps EE static mask1 + dynamic mask1e.
      * max-num-gpii=12 is NOT permission to read other EEs' instances5..11.
@@ -154,7 +177,7 @@ static int vtg_lease(void *ctx)
 {
     (void)ctx;
     return touch.gpi_claimed && touch.gpi && touch.se && touch.smmu && vtg_clock_ready() &&
-        vtg_pages() && vtg_power_valid() && ((vt_rd(touch.se,0x68)>>8)&255)==1 &&
+        vtg_pages() && vtg_power_valid() && vtg_irqs_ready() && ((vt_rd(touch.se,0x68)>>8)&255)==1 &&
         (vt_rd(touch.se,0x64)&1) && vtg_route_live();
 }
 static int vtg_read(void *ctx,unsigned off,uint32_t *out)
@@ -188,6 +211,13 @@ static int vtg_acquire_registered_power(void)
     }
     touch.power_held=true;return 1;
 }
+static void vtg_checkpoint(void *ctx,unsigned checkpoint)
+{
+    (void)ctx;
+    /* The generic engine calls this only for its first exchange. RAM log
+     * only: no device read, delay, IRQ mutation or deadline extension. */
+    printf("VERMEER GPI CHECKPOINT: first-exchange=%u\n",checkpoint);
+}
 static int vtg_prepare(void)
 {
     if(!touch.power_held)touch.power=os_atomic_load(&vtg_power_provider,acquire);
@@ -199,6 +229,11 @@ static int vtg_prepare(void)
     if(!vt_reset_ready()) {
         printf("VERMEER TOUCH: GPIO24 reset remains low; no working RPMh/reset provider registered\n");return 0;
     }
+    if(!touch.power_held || !touch.power || touch.power->valid(touch.power->ctx)!=1) {
+        printf("VERMEER TOUCH: GPI needs the current-FDT-checked RPMh lease for IRQ qualification\n");return 0;
+    }
+    if(!vtg_gic)vtg_gic=ml_io_map(0x17100000,0x10000);
+    if(!vtg_irqs_ready())return 0;
     if(!touch.gpi)touch.gpi=ml_io_map(0x00a00000,0x60000);
     if(!vtg_quiet(NULL) || !os_atomic_cmpxchg(&vtg_owner,0,1,acq_rel)) {
         printf("VERMEER TOUCH: GPI provider not exclusively quiescent; no takeover\n");return 0;
@@ -238,7 +273,7 @@ static int vtg_prepare(void)
         }
         printf("VERMEER TOUCH PHASE: SMMU attach complete bank=%u slot=%u\n",touch.iommu.bank,touch.iommu.slot);
     }
-    touch.transport=(struct vgpt){.io={NULL,vtg_lease,vtg_read,vtg_write,vtg_cache,vtg_now,vtg_pause,vtg_idle}};
+    touch.transport=(struct vgpt){.io={NULL,vtg_lease,vtg_read,vtg_write,vtg_cache,vtg_now,vtg_pause,vtg_idle,vtg_checkpoint}};
     for(unsigned i=0;i<5;i++)touch.transport.page[i]=(struct vgpt_page){(void *)(touch.dma_va+i*PAGE_SIZE),
         touch.identity_mapping?touch.dma_pa+i*PAGE_SIZE:0x100000+i*PAGE_SIZE};
     printf("VERMEER TOUCH PHASE: GPI start begin\n");

@@ -3,14 +3,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../xnu/vermeer/vermeer_gpi_transport.h"
+#include "../xnu/vermeer/vermeer_rpmh_board_contract.h"
 enum {HEALTHY,NO_COMMAND_IRQ,NO_EVENTS,ERROR_EVENT,SHORT_EVENT,WRONG_POINTER,
       DUPLICATE_EVENT,WRONG_CHANNEL,WRONG_TYPE,ACTIVE_SERIAL,REVOKE_TX_DB,SLOW_CALLBACK,
       IO_FAILURE,CACHE_FAILURE,REVERSE_EVENTS,LEASE_BOUNDARY,BACKWARD_TIME,PHASE_CHANGE,
-      CACHE_REVOKE,WAIT_FAIL,BAD_PRODUCER,BAD_CHANNEL_RP,SLOW_COMMAND,NO_COMMAND_CHANGE,WRONG_COMMAND_STATE};
+      CACHE_REVOKE,WAIT_FAIL,BAD_PRODUCER,BAD_CHANNEL_RP,SLOW_COMMAND,NO_COMMAND_CHANGE,WRONG_COMMAND_STATE,
+      TRACE_REVOKE,TRACE_TIMEOUT};
 struct fixture {
     struct vgpt g;uint32_t reg[0x14000/4];uint64_t now;
     unsigned mode,reads,writes,cache_count,fail_at,callbacks,ev_prod,rx_doorbell,revoked;
     unsigned clean[5],invalid[5],transfers;
+    unsigned trace_count,trace_last,trace_fail;
 };
 static unsigned page_for(struct fixture *f,void *cpu)
 {for(unsigned i=0;i<5;i++)if(f->g.page[i].cpu==cpu)return i;assert(0);return 0;}
@@ -110,10 +113,21 @@ static int pause_us(void *ctx,unsigned us)
 {struct fixture *f=ctx;assert(us==20);f->now+=us;return f->mode!=WAIT_FAIL;}
 static int idle(void *ctx)
 {return ((struct fixture *)ctx)->mode!=ACTIVE_SERIAL;}
+static void checkpoint(void *ctx,unsigned point)
+{
+    struct fixture *f=ctx;assert(point==f->g.checkpoint && !f->g.exchanges);
+    assert(point>=1 && point<=VGPT_TRACE_COMPLETE);++f->trace_count;f->trace_last=point;
+    if(point==VGPT_TRACE_RX_DB)assert(!f->rx_doorbell && !f->transfers);
+    if(point==VGPT_TRACE_TX_DB)assert(f->rx_doorbell==1 && !f->transfers);
+    if(point==f->trace_fail){
+        if(f->mode==TRACE_REVOKE)f->revoked=1;
+        if(f->mode==TRACE_TIMEOUT)f->now+=100000;
+    }
+}
 static struct fixture *make(unsigned mode)
 {
     struct fixture *f=calloc(1,sizeof(*f));assert(f);f->mode=mode;f->now=1000;
-    f->g.io=(struct vgpt_ops){f,lease,rd,wr,cache,time_us,pause_us,idle};
+    f->g.io=(struct vgpt_ops){f,lease,rd,wr,cache,time_us,pause_us,idle,checkpoint};
     for(unsigned i=0;i<5;i++) {
         f->g.page[i].cpu=aligned_alloc(16384,16384);assert(f->g.page[i].cpu);
         f->g.page[i].iova=UINT64_C(0x8c1000000)+i*16384;
@@ -135,7 +149,58 @@ static void healthy(void)
             for(unsigned i=n;i<1032;i++)assert(rx[i]==0xcc);
         }
         assert(!f->g.quarantined && f->g.events==2064 && f->invalid[VGPT_RX]==1032);
+        assert(f->trace_count==12 && f->trace_last==VGPT_TRACE_COMPLETE && f->g.exchanges==1032);
         destroy(f);
+    }
+}
+struct irq_fixture {uint32_t reg[0x400/4];unsigned calls,fail_at;};
+static int irq_read(void *ctx,unsigned at,uint32_t *out)
+{
+    struct irq_fixture *f=ctx;assert(at==4 || (at>=0x100 && at<0x400 && !(at&3)));
+    if(++f->calls==f->fail_at)return 0;
+    *out=f->reg[at/4];return 1;
+}
+static uint32_t be32(const uint8_t *p)
+{return (uint32_t)p[0]<<24|(uint32_t)p[1]<<16|(uint32_t)p[2]<<8|p[3];}
+static const struct vrb_rule *irq_rule(const char *path)
+{
+    for(size_t i=0;i<VRB_RULE_COUNT;i++)if(!strcmp(vrb_rules[i].path,path) && !strcmp(vrb_rules[i].name,"interrupts"))return &vrb_rules[i];
+    assert(0);return NULL;
+}
+static void irq_contract(void)
+{
+    const struct vrb_rule *apps=irq_rule("/soc/apps-smmu@15000000");
+    const struct vrb_rule *gpi=irq_rule("/soc/qcom,gpi-dma@a00000");
+    const struct vrb_rule *se=irq_rule("/soc/qcom,qupv3_1_geni_se@ac0000/spi@a90000");
+    assert(apps->size>=71*12 && gpi->size==12*12 && se->size==12);
+    unsigned fixed[3]={be32(gpi->bytes+4)+32,be32(se->bytes+4)+32,be32(apps->bytes+4)+32};
+    for(unsigned bank=0;bank<=70;bank++) {
+        struct irq_fixture f={0};f.reg[1]=31;struct vgpt_irq_observation r;
+        assert(vgpt_irqs_masked(&f,irq_read,bank,&r) && !r.source);
+        unsigned calls=f.calls;
+        for(unsigned source=0;source<(bank<70?4u:3u);source++)for(unsigned active=0;active<2;active++) {
+            unsigned id=source<3?fixed[source]:be32(apps->bytes+12*(bank+1)+4)+32;
+            memset(&f,0,sizeof f);f.reg[1]=31;
+            f.reg[((active?0x300:0x100)+4*(id/32))/4]=1u<<(id%32);
+            assert(!vgpt_irqs_masked(&f,irq_read,bank,&r));
+            assert(r.source==source+1 && r.intid==id && f.calls==1+2*(source+1));
+        }
+        for(unsigned i=1;i<=calls;i++) {
+            memset(&f,0,sizeof f);f.reg[1]=31;f.fail_at=i;
+            assert(!vgpt_irqs_masked(&f,irq_read,bank,&r) && f.calls==i);
+        }
+    }
+    struct irq_fixture f={0};struct vgpt_irq_observation r;
+    assert(!vgpt_irqs_masked(&f,irq_read,70,&r) && f.calls==1 && r.intid==311);
+    f.calls=0;assert(!vgpt_irqs_masked(&f,irq_read,71,&r) && !f.calls);
+    /* A trace callback cannot bypass the real lease/time guards, even at
+     * the final cache-acquire boundary; caller RX stays unpublished. */
+    for(unsigned mode=TRACE_REVOKE;mode<=TRACE_TIMEOUT;mode++)for(unsigned point=1;point<=12;point++) {
+        struct fixture *g=make(mode);uint8_t tx[8]={0},rx[8];memset(rx,0xcc,sizeof rx);
+        assert(vgpt_start(&g->g));g->trace_fail=point;
+        assert(!vgpt_exchange(&g->g,tx,rx,8,0,128) && g->g.quarantined);
+        for(unsigned i=0;i<8;i++)assert(rx[i]==0xcc);
+        assert(g->trace_last==point && !g->g.exchanges);destroy(g);
     }
 }
 static void faults(void)
@@ -206,4 +271,4 @@ static void transfer_boundaries(void)
     assert(f->reads==reads && f->writes==writes && !f->g.quarantined);destroy(f);
 }
 int main(void)
-{healthy();faults();transfer_boundaries();puts("GPI transport: real command/doorbell lifecycle, ring wrap, both validated completions, every transfer IO/cache/lease/clock/phase boundary and permanent quarantine PASS");}
+{healthy();irq_contract();faults();transfer_boundaries();puts("GPI transport: real command/doorbell lifecycle, ring wrap, both validated completions, IRQ contract, first-exchange checkpoints, every transfer IO/cache/lease/clock/phase boundary and permanent quarantine PASS");}

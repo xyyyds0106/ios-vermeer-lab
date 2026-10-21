@@ -213,8 +213,17 @@ static void vt_gpi_provider_snapshot(void)
 #include "vermeer_touch_gpi_native.h"
 static int vt_transfer(unsigned n)
 {
-    int ok=touch.use_gpi?vgpt_exchange(&touch.transport,touch.tx,touch.rx,n,
-        vt_rd(touch.se,0x7c)&7u,128):vg_transfer(&touch.bus,touch.tx,touch.rx,n);
+    int ok;
+    if(touch.use_gpi) {
+        unsigned first=!touch.transport.exchanges;
+        if(first){printf("VERMEER GPI CHECKPOINT: GENI_CLK_SEL read begin\n");
+            if(touch.manual_mode==2)vt_sleep(200);}
+        /* The pinned spi-msm-geni GPI path uses the real GENI_CLK_SEL in
+         * CONFIG0 clock-source bits. Keep that input; do not guess a parent. */
+        unsigned source=vt_rd(touch.se,0x7c)&7u;
+        if(first)printf("VERMEER GPI CHECKPOINT: GENI_CLK_SEL read complete source=%u; exchange call next\n",source);
+        ok=vgpt_exchange(&touch.transport,touch.tx,touch.rx,n,source,128);
+    } else ok=vg_transfer(&touch.bus,touch.tx,touch.rx,n);
     if(touch.use_gpi)vtg_status();
     os_atomic_store(&touch.spi_phase,touch.bus.phase,relaxed);os_atomic_store(&touch.spi_irq,touch.bus.last_irq,relaxed);
     os_atomic_store(&touch.spi_status,touch.bus.last_status,relaxed);

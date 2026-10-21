@@ -54,6 +54,17 @@ static inline int vrb_dt_check(const uint8_t *f,size_t available)
                 avdd_phandles+=v==0x2ec;iovdd_phandles+=v==0x2a;
                 gic_phandles+=v==1;
             }
+            /* Related IRQs inherit the verified GIC parent directly. A
+             * child override or IRQ nexus could invalidate the fixed SPI
+             * indexing even while the interrupts byte arrays still match. */
+            int irq_ancestor=0;
+            for(size_t r=0;r<VRB_RULE_COUNT;r++)
+                if(vrb_string((const uint8_t *)vrb_rules[r].name,10,"interrupts") &&
+                   vrb_ancestor(path,used,vrb_rules[r].path))irq_ancestor=1;
+            if(irq_ancestor && vrb_string(f+strings+no,nn,"interrupt-parent") &&
+               (len!=4 || vrb_be32(f+at)!=1))return 18;
+            if(irq_ancestor && (vrb_string(f+strings+no,nn,"interrupts-extended") ||
+               vrb_string(f+strings+no,nn,"interrupt-map") || vrb_string(f+strings+no,nn,"interrupt-map-mask")))return 18;
             int relevant=0;
             if(vrb_string(f+strings+no,nn,"status"))for(size_t r=0;r<VRB_RULE_COUNT;r++)
                 if(vrb_ancestor(path,used,vrb_rules[r].path) &&

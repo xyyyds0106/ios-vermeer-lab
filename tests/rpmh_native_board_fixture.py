@@ -5,7 +5,7 @@ must never be embedded in a hardware image or passed to a real provider.
 """
 from pathlib import Path
 import json,re,struct
-def fixture():
+def fixture(overrides=()):
     header=Path(__file__).resolve().parent.parent/'xnu/vermeer/vermeer_rpmh_board_contract.h'
     root={'props':{},'children':{}}
     count=0
@@ -20,6 +20,11 @@ def fixture():
             node=node['children'].setdefault(name,{'props':{},'children':{}})
         assert key not in node['props'];node['props'][key]=values;count+=1
     assert count>=61
+    for path,key,value in overrides:
+        node=root
+        for name in path.strip('/').split('/') if path!='/' else []:
+            node=node['children'][name]
+        node['props'][key]=value
     strings=bytearray();offsets={}
     def word(value):return struct.pack('>I',value)
     def pad(data):return data+bytes(-len(data)%4)
