@@ -204,6 +204,9 @@ boot image SHA256 is
 ff867146a703444e2e22f9ef8f00e019c6937ecd68c9af882fcd41245ee967bb.
 Local clang14 also accepts the integrated transport. The block device presents
 only the prepared16GiB volume so alternate HFS headers stay inside its bounds.
-Real-device integrated startup remains unverified; the local root candidate
-is not yet flashed. Overwriting userdata and enabling
-root writes require the user's concrete approval before execution.
+The user explicitly approved the concrete userdata overwrite and bounded root
+writes. Root002 flashed successfully (99/99 chunks). A hardware photograph
+then confirms the integrated kernel reaches AMFI/HFS registration and network
+self-tests. UFS root mounting and Apple launchd remain unverified in that photo.
+The boot host command did not return its final acknowledgment; the photograph
+establishes kernel execution separately from that transport status.
