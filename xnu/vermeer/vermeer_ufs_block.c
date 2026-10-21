@@ -26,6 +26,15 @@ static struct {
 static LCK_GRP_DECLARE(vermeer_ufs_grp, "vermeer_ufs");
 static LCK_MTX_DECLARE(vermeer_ufs_lock, &vermeer_ufs_grp);
 
+static uint64_t vb_device_bytes(void)
+{
+    /* The integrated HFS volume is16GiB inside a larger userdata partition.
+     * Present the volume size, so HFS alternate headers stay in that volume.
+     * Keep the full GPT geometry separately for physical write guards.
+     */
+    return vb.root_valid ? 4194304ULL * 4096 : vb.blocks * 4096;
+}
+
 static void vb_restore(void)
 {
     if (!vb.owned) return;
@@ -129,7 +138,7 @@ static void vb_strategy(buf_t bp)
     if (!count) goto done;
     if (buf_map(bp, &va)) { error = EIO; goto done; }
     lck_mtx_lock(&vermeer_ufs_lock);
-    if (vg_io_bounds(buf_blkno(bp), vb.secsize, count, vb.blocks * 4096, &off)) {
+    if (vg_io_bounds(buf_blkno(bp), vb.secsize, count, vb_device_bytes(), &off)) {
         error = EINVAL;
         goto unlock;
     }
@@ -176,7 +185,7 @@ static int vb_ioctl(dev_t dev, u_long cmd, caddr_t data, __unused int flags,
         lck_mtx_unlock(&vermeer_ufs_lock);
         return 0;
     case DKIOCGETPHYSICALBLOCKSIZE: *f = 4096; return 0;
-    case DKIOCGETBLOCKCOUNT: *n = vb.blocks * 4096 / vb.secsize; return 0;
+    case DKIOCGETBLOCKCOUNT: *n = vb_device_bytes() / vb.secsize; return 0;
     case DKIOCISWRITABLE: *f = vb.writable; return 0;
     case DKIOCGETMAXBLOCKCOUNTREAD: *n = 8192 / vb.secsize; return 0;
     case DKIOCGETMAXBLOCKCOUNTWRITE: *n = vb.writable ? 8192 / vb.secsize : 0; return 0;
@@ -208,7 +217,7 @@ static int vb_read(dev_t d, struct uio *u, __unused int f)
 {
     if (minor(d) || !vb.ready || vb.failed) return ENXIO;
     int64_t offset = uio_offset(u), residual = uio_resid(u);
-    uint64_t part_bytes = vb.blocks * 4096;
+    uint64_t part_bytes = vb_device_bytes();
     if (offset < 0 || residual < 0 || (uint64_t)offset > part_bytes) return EINVAL;
     int error = 0;
     lck_mtx_lock(&vermeer_ufs_lock);
