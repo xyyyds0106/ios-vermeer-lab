@@ -12,6 +12,7 @@
 #include <setjmp.h>
 #define ARM64_BOARD_CONFIG_SWEET 1
 typedef uintptr_t vm_offset_t;
+typedef uint64_t vm_map_offset_t;
 typedef size_t vm_size_t;
 typedef unsigned vm_prot_t;
 typedef void *DTEntry;
@@ -30,7 +31,7 @@ static struct {
     const uint8_t *boot_fdt;unsigned boot_fdt_bytes;
     jmp_buf fault;
 } hw;
-static vm_offset_t io_map(uint64_t pa,vm_size_t size,unsigned attr,vm_prot_t prot,int unmappable)
+static vm_offset_t io_map(vm_map_offset_t pa,vm_size_t size,unsigned attr,vm_prot_t prot,bool unmappable)
 {
     ++hw.maps;assert(!unmappable);
     if(pa==0x17a20000) {assert(size==0x10000 && attr==VM_WIMG_IO && prot==3);return (uintptr_t)hw.rsc;}

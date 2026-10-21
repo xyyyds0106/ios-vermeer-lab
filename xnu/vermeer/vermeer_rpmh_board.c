@@ -19,6 +19,12 @@
 #include "vermeer_rpmh_board_dt.h"
 #include "vermeer_rpmh_touch_native.h"
 #include "vermeer_touch_power_if.h"
+/* BSD's build does not expose the MACH/PEXPERT-private declaration in
+ * arm/machine_routines.h. Match the actual kernel function's full signature;
+ * an implicit int return would truncate the mapped virtual address. */
+#if !defined(PEXPERT_KERNEL_PRIVATE) && !defined(MACH_KERNEL_PRIVATE)
+extern vm_offset_t io_map(vm_map_offset_t,vm_size_t,unsigned int,vm_prot_t,bool);
+#endif
 /* Saved DT: TLMM f000000 + register bank100000 + GPIO24*1000. Mapping is
  * one native16KB page; only GPIO24 config and in/out are accessed. */
 #define VRB_RESET_PA UINT64_C(0x0f118000)
