@@ -36,6 +36,8 @@ int vermeer_touch_power_register(const struct vtp_ops *ops)
 }
 static void vtg_status(void)
 {
+    if(touch.transport.verify_mask)printf("VERMEER GPI READBACK: reg=%05x expected=%08x observed=%08x mask=%08x; DMA refused\n",
+        touch.transport.verify_register,touch.transport.verify_expected,touch.transport.verify_observed,touch.transport.verify_mask);
     os_atomic_store(&touch.gpi_phase,touch.transport.phase,relaxed);
     os_atomic_store(&touch.gpi_error,touch.transport.error,relaxed);
     os_atomic_store(&touch.gpi_events,touch.transport.events,relaxed);
@@ -230,7 +232,21 @@ static int vtg_write(void *ctx,unsigned off,uint32_t value)
             (off>=base+0x60 && off<=base+0x6c && !(off&3));
     }
     allowed|=(off>=0x11000 && off<=0x11034 && !(off&3));
-    if(!allowed)return 0;vt_wr(touch.gpi,off,value);return 1;
+    if(!allowed)return 0;
+    int trace=touch.manual_mode==2 && !touch.transport.exchanges && (off==0x12000 || off==0x12008);
+    if(trace) {
+        printf("VERMEER GPI DOORBELL: store-begin reg=%05x value=%08x\n",off,value);
+        /* Let the independent 1ms USB worker export this boundary. This time
+         * counts against the unchanged 100ms exchange deadline. Revalidate
+         * the full live lease after scheduling and before the MMIO store. */
+        vt_sleep(10);if(!vgpt_guard(&touch.transport))return 0;
+    }
+    vt_wr(touch.gpi,off,value);
+    if(trace) {
+        printf("VERMEER GPI DOORBELL: store-complete reg=%05x value=%08x\n",off,value);
+        vt_sleep(10);
+    }
+    return 1;
 }
 static int vtg_idle(void *ctx)
 {(void)ctx;if(!vtg_lease(NULL))return -1;return !(vt_rd(touch.se,VG_STATUS)&0x1001);}
@@ -318,9 +334,14 @@ static int vtg_prepare(void)
     touch.transport=(struct vgpt){.io={NULL,vtg_lease,vtg_read,vtg_write,vtg_cache,vtg_now,vtg_pause,vtg_idle,vtg_checkpoint}};
     for(unsigned i=0;i<5;i++)touch.transport.page[i]=(struct vgpt_page){(void *)(touch.dma_va+i*PAGE_SIZE),
         touch.identity_mapping?touch.dma_pa+i*PAGE_SIZE:0x100000+i*PAGE_SIZE};
+    printf("VERMEER GPI DMA: pa=%llx table-pa=%llx ttbr0=%llx asid=%u cbar=%08x tcr=%08x tcr2=%08x sctlr=%08x\n",
+        (unsigned long long)touch.dma_pa,(unsigned long long)touch.iommu.table_pa,
+        (unsigned long long)touch.iommu.image.ttbr0,touch.iommu.asid,touch.iommu.image.cbar,
+        touch.iommu.image.tcr,touch.iommu.image.tcr2,touch.iommu.image.sctlr);
     printf("VERMEER TOUCH PHASE: GPI start begin\n");
     if(touch.manual_mode==2)vt_sleep(200);
     if(!vgpt_start(&touch.transport)){vtg_status();return 0;}
+    printf("VERMEER GPI READBACK: allocated and started contexts verified; DMA not submitted\n");
     printf("VERMEER TOUCH PHASE: GPI start complete\n");
     for(unsigned i=0;i<4;i++) {
         unsigned reg=(44+i)*0x1000;

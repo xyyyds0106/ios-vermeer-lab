@@ -8,12 +8,13 @@ enum {HEALTHY,NO_COMMAND_IRQ,NO_EVENTS,ERROR_EVENT,SHORT_EVENT,WRONG_POINTER,
       DUPLICATE_EVENT,WRONG_CHANNEL,WRONG_TYPE,ACTIVE_SERIAL,REVOKE_TX_DB,SLOW_CALLBACK,
       IO_FAILURE,CACHE_FAILURE,REVERSE_EVENTS,LEASE_BOUNDARY,BACKWARD_TIME,PHASE_CHANGE,
       CACHE_REVOKE,WAIT_FAIL,BAD_PRODUCER,BAD_CHANNEL_RP,SLOW_COMMAND,NO_COMMAND_CHANGE,WRONG_COMMAND_STATE,
-      TRACE_REVOKE,TRACE_TIMEOUT};
+      TRACE_REVOKE,TRACE_TIMEOUT,IGNORE_WRITE,WRITE_GUARD_TIMEOUT};
 struct fixture {
     struct vgpt g;uint32_t reg[0x14000/4];uint64_t now;
     unsigned mode,reads,writes,cache_count,fail_at,callbacks,ev_prod,rx_doorbell,revoked;
     unsigned clean[5],invalid[5],transfers;
     unsigned trace_count,trace_last,trace_fail;
+    unsigned ignore_register;
 };
 static unsigned page_for(struct fixture *f,void *cpu)
 {for(unsigned i=0;i<5;i++)if(f->g.page[i].cpu==cpu)return i;assert(0);return 0;}
@@ -81,13 +82,18 @@ static int wr(void *ctx,unsigned off,uint32_t value)
 {
     struct fixture *f=ctx;assert(!(off&3) && off<sizeof(f->reg));++f->writes;
     if(fail(f))return 0;
+    if(f->mode==IGNORE_WRITE && off==f->ignore_register)return 1;
+    if(f->mode==WRITE_GUARD_TIMEOUT && off==0x12008) {
+        f->now+=100000;return vgpt_guard(&f->g);
+    }
     if(off==0x130a0)f->reg[0x13090/4]&=~value;
     else if(off==0x130a4)f->reg[0x13094/4]&=~value;
     else if(off==0x13008 || off==0x13010) {
         unsigned ev=off==0x13010,ch=value&255,op=value>>24;
         assert(ch<2 && op<2);
         unsigned base=ev?0x11000:0x10000+0x80*ch;
-        if(f->mode!=NO_COMMAND_CHANGE)f->reg[base/4]=(f->mode==WRONG_COMMAND_STATE?15u:op?2u:1u)<<20;
+        if(f->mode!=NO_COMMAND_CHANGE)f->reg[base/4]=(f->reg[base/4]&~0xf00000u)|
+            (f->mode==WRONG_COMMAND_STATE?15u:op?2u:1u)<<20;
         if(f->mode!=NO_COMMAND_IRQ)f->reg[(ev?0x13094:0x13090)/4]|=1u<<(ev?0:ch);
         if(op)pointer(f,base+0x10,((uint64_t)f->reg[(base+12)/4]<<32)|f->reg[(base+8)/4]);
     } else {
@@ -270,5 +276,41 @@ static void transfer_boundaries(void)
     assert(!vgpt_exchange(&f->g,tx,(void *)&f->g,8,0,128));
     assert(f->reads==reads && f->writes==writes && !f->g.quarantined);destroy(f);
 }
+static void context_readback(void)
+{
+    /* A posted write returning success does not establish hardware state.
+     * Drop each nonzero context/base/scratch write and prohibit DMA. */
+    const unsigned ignored[]={0x11000,0x11004,0x11008,0x1100c,
+        0x10000,0x10004,0x10008,0x1000c,0x10060,
+        0x10080,0x10084,0x10088,0x1008c,0x100e0};
+    for(unsigned i=0;i<sizeof ignored/sizeof ignored[0];i++) {
+        struct fixture *f=make(IGNORE_WRITE);f->ignore_register=ignored[i];
+        assert(!vgpt_start(&f->g) && f->g.quarantined && f->g.error==VGPT_STATE);
+        assert(f->g.verify_register==ignored[i] && f->g.verify_mask && !f->rx_doorbell && !f->transfers);
+        destroy(f);
+    }
+    const unsigned fields[]={0,4,8,12};uint8_t tx[8]={0},rx[8];
+    for(unsigned c=0;c<3;c++)for(unsigned i=0;i<4;i++) {
+        unsigned base=c==2?0x11000:0x10000+c*0x80,off=base+fields[i];
+        uint32_t mask=i?UINT32_MAX:c==2?0xfff1000f:0xfff7c00f;
+        for(unsigned bit=0;bit<32;bit++)if(mask&(1u<<bit)) {
+            struct fixture *f=make(HEALTHY);assert(vgpt_start(&f->g));
+            f->reg[off/4]^=1u<<bit;unsigned writes=f->writes;memset(rx,0xcc,sizeof rx);
+            assert(!vgpt_exchange(&f->g,tx,rx,sizeof tx,0,128) && f->g.quarantined);
+            assert(f->g.verify_register==off && f->writes==writes && !f->rx_doorbell && !f->transfers);
+            for(unsigned n=0;n<sizeof rx;n++)assert(rx[n]==0xcc);
+            destroy(f);
+        }
+    }
+    struct fixture *f=make(HEALTHY);assert(vgpt_start(&f->g));
+    f->reg[0x10000/4]|=0x30;f->reg[0x10080/4]|=0x130;f->reg[0x11000/4]|=0x30;
+    assert(vgpt_exchange(&f->g,tx,rx,sizeof tx,0,128));destroy(f);
+    f=make(HEALTHY);assert(vgpt_start(&f->g));f->mode=WRITE_GUARD_TIMEOUT;
+    memset(rx,0xcc,sizeof rx);
+    assert(!vgpt_exchange(&f->g,tx,rx,sizeof tx,0,128) && f->g.error==VGPT_TIMEOUT);
+    assert(f->g.quarantined && !f->rx_doorbell && !f->transfers);
+    for(unsigned i=0;i<sizeof rx;i++)assert(rx[i]==0xcc);
+    destroy(f);
+}
 int main(void)
-{healthy();irq_contract();faults();transfer_boundaries();puts("GPI transport: real command/doorbell lifecycle, ring wrap, both validated completions, IRQ contract, first-exchange checkpoints, every transfer IO/cache/lease/clock/phase boundary and permanent quarantine PASS");}
+{healthy();irq_contract();faults();transfer_boundaries();context_readback();puts("GPI transport: context write/readback and every live-field mutation, real command/doorbell lifecycle, ring wrap, both validated completions, IRQ contract, first-exchange checkpoints, every transfer IO/cache/lease/clock/phase boundary and permanent quarantine PASS");}

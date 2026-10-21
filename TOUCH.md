@@ -253,6 +253,26 @@ the K70 hardware contract. Its published status does not establish working
 GPI DMA, physical touch or GPU acceleration. This candidate retains K70
 GPIO44..47, GT9916 validation and the existing GUI/kernel packaging checks.
 
+GUI020 displayed the graphical interface and completed both rail ACKs. Its
+actual DFS table qualified XO at level0, divider128,150kHz; SMMU bank69/slot6
+and GPI startup completed. USB disconnected after first-exchange checkpoint7
+(before the RX doorbell in source order), and the handset returned to Fastboot.
+USB export can lag execution, so this does not prove which store/read faulted.
+No SPI identity or physical input was obtained.
+
+The next candidate verifies actual event/channel CONFIG, state, length and
+both ring-base halves after programming and channel start, and again before
+every exchange. It also verifies the static channel pairing/protocol/SEID
+scratch value before start. Ignored writes or changed contexts quarantine
+the transport before either DMA doorbell, retaining mismatch details. Host
+tests drop each setup write and mutate every checked live field. Manual mode2
+additionally exports first-doorbell store-begin/store-complete boundaries,
+yielding10ms before/after each store so the independent1ms USB worker can run.
+Each yield remains inside the unchanged100ms deadline and the full lease is
+rechecked before the store. DMA physical/table/context values are logged
+before startup. These changes improve qualification and fault localization;
+they do not establish a fix for the physical restart.
+
 The GUI build registers two shared SMMU C objects (`vermeer_touch_smmu_tables.c`
 and `vermeer_touch_smmu_context.c`). GPU integration must reuse their exported
 ArmSmmu4K symbols instead of linking duplicate copies of the same sources.

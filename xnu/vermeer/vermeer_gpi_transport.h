@@ -59,6 +59,7 @@ struct vgpt {
     unsigned phase,active_phase,error,quarantined,hardware_touched,tx_wp,rx_wp,ev_rp;
     unsigned last_channel,last_code,last_status,last_length,events,commands;
     unsigned checkpoint,exchanges;
+    unsigned verify_register;uint32_t verify_expected,verify_observed,verify_mask;
     uint64_t begin,last,budget,command_begin;unsigned command_budget;
 };
 static inline int vgpt_fail(struct vgpt *g,unsigned error)
@@ -86,7 +87,7 @@ static inline int vgpt_wr(struct vgpt *g,unsigned reg,uint32_t value)
 {
     if(!vgpt_guard(g))return 0;
     g->hardware_touched=1;
-    if(g->io.write(g->io.ctx,reg,value)!=1)return vgpt_fail(g,VGPT_IO);
+    if(g->io.write(g->io.ctx,reg,value)!=1)return g->quarantined?0:vgpt_fail(g,VGPT_IO);
     return vgpt_guard(g);
 }
 static inline int vgpt_cache(struct vgpt *g,unsigned page,unsigned op)
@@ -160,6 +161,29 @@ static inline int vgpt_pointer(struct vgpt *g,unsigned reg,unsigned page,unsigne
     if(hi!=again || ptr<base || ptr-base>=bytes || ((ptr-base)&15))return vgpt_fail(g,VGPT_STATE);
     *index=(unsigned)((ptr-base)/16);return 1;
 }
+static inline int vgpt_expect(struct vgpt *g,unsigned reg,uint32_t expected,uint32_t mask)
+{
+    uint32_t observed;
+    if(!vgpt_rd(g,reg,&observed))return 0;
+    if((observed&mask)==(expected&mask))return 1;
+    g->verify_register=reg;g->verify_expected=expected;g->verify_observed=observed;g->verify_mask=mask;
+    return vgpt_fail(g,VGPT_STATE);
+}
+static inline int vgpt_context(struct vgpt *g,unsigned channel,unsigned state)
+{
+    if(channel>2 || state<1 || state>2)return vgpt_fail(g,VGPT_INVALID);
+    unsigned event=channel==2,base=event?0x11000:0x10000+channel*0x80;
+    unsigned page=event?VGPT_ER:channel?VGPT_RR:VGPT_TR;
+    uint64_t addr=g->page[page].iova;
+    uint32_t cfg=0x10000002|(event?0x10000:channel?0:8)|(state<<20);
+    /* EE/CHID are read-only identity fields. Check every documented writable
+     * CONFIG field plus real allocation/start state, length and both base
+     * halves. Never read a write-only doorbell to verify it. */
+    uint32_t mask=event?0xfff1000f:0xfff7c00f;
+    return vgpt_expect(g,base,cfg,mask) && vgpt_expect(g,base+4,event?4096:1024,UINT32_MAX) &&
+        vgpt_expect(g,base+8,(uint32_t)addr,UINT32_MAX) &&
+        vgpt_expect(g,base+12,(uint32_t)(addr>>32),UINT32_MAX);
+}
 static inline int vgpt_start(struct vgpt *g)
 {
     if(!vgpt_valid(g) || g->phase!=VGPT_NEW || g->quarantined)return 0;
@@ -194,6 +218,7 @@ static inline int vgpt_start(struct vgpt *g)
         {0x11028,0},{0x1102c,0},{0x11030,0},{0x11034,0}};
     for(unsigned i=0;i<sizeof(evregs)/sizeof(evregs[0]);i++)
         if(!vgpt_wr(g,evregs[i][0],evregs[i][1]))return 0;
+    if(!vgpt_context(g,2,1))return 0;
     if(!vgpt_wr(g,0x12100,(uint32_t)(ev+4096-16)))return 0;
     for(unsigned ch=0;ch<2;ch++) {
         if(!vgpt_command(g,ch,0,1))return 0;
@@ -204,8 +229,10 @@ static inline int vgpt_start(struct vgpt *g)
             {db+4,(uint32_t)(addr>>32)},{base+0x60,(ch?0:0x10000)|0x14},
             {base+0x64,0},{base+0x68,0},{base+0x6c,0},{base+0x5c,1}};
         for(unsigned i=0;i<sizeof(reg)/sizeof(reg[0]);i++)if(!vgpt_wr(g,reg[i][0],reg[i][1]))return 0;
+        if(!vgpt_context(g,ch,1) || !vgpt_expect(g,base+0x60,(ch?0:0x10000)|0x14,UINT32_MAX))return 0;
     }
     if(!vgpt_command(g,1,1,2) || !vgpt_command(g,0,1,2))return 0;
+    if(!vgpt_context(g,0,2) || !vgpt_context(g,1,2) || !vgpt_context(g,2,1))return 0;
     g->phase=g->active_phase=VGPT_READY;return vgpt_guard(g);
 }
 static inline int vgpt_exchange(struct vgpt *g,const uint8_t *tx,uint8_t *rx,unsigned count,
@@ -225,6 +252,7 @@ static inline int vgpt_exchange(struct vgpt *g,const uint8_t *tx,uint8_t *rx,uns
     g->last=g->begin=now;g->budget=100000;g->phase=g->active_phase=VGPT_TRANSFER;
     struct vgp_spi_plan plan;
     if(!vgp_spi_plan(&plan,g->page[VGPT_TX].iova,g->page[VGPT_RX].iova,count,clock_source,divider))return vgpt_fail(g,VGPT_INVALID);
+    if(!vgpt_context(g,0,2) || !vgpt_context(g,1,2) || !vgpt_context(g,2,1))return 0;
     if(!vgpt_mark(g,VGPT_TRACE_POINTERS))return 0;
     unsigned index;
     if(!vgpt_pointer(g,0x10010,VGPT_TR,1024,&index))return 0;
