@@ -5,16 +5,30 @@ on:
     paths:
       - .github/workflows/media-checks.yml
       - xnu/vermeer/vermeer_bt_h4.h
+      - xnu/vermeer/vermeer_bt_identity.h
+      - xnu/vermeer/vermeer_bt_observe.h
+      - xnu/vermeer/vermeer_media_tlmm.h
       - tools/media_inventory.py
       - tests/bt_h4_test.c
+      - tests/bt_identity_test.c
+      - tests/media_tlmm_test.c
+      - tests/media_records_test.py
+      - tools/media_records.py
       - tests/media_inventory_test.py
       - tests/run-media-tests.sh
   pull_request:
     paths:
       - .github/workflows/media-checks.yml
       - xnu/vermeer/vermeer_bt_h4.h
+      - xnu/vermeer/vermeer_bt_identity.h
+      - xnu/vermeer/vermeer_bt_observe.h
+      - xnu/vermeer/vermeer_media_tlmm.h
       - tools/media_inventory.py
       - tests/bt_h4_test.c
+      - tests/bt_identity_test.c
+      - tests/media_tlmm_test.c
+      - tests/media_records_test.py
+      - tools/media_records.py
       - tests/media_inventory_test.py
       - tests/run-media-tests.sh
 permissions:
