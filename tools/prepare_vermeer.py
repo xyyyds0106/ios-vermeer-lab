@@ -29,6 +29,11 @@ if ios:
 counts = {'framebuffer': 0, 'width': 0, 'height': 0, 'stride': 0, 'marker': 0, 'timer': 0}
 for patch in patches:
     text = patch.read_text()
+    if int(patch.name[:4]) > 20:
+        # 0020-vermeer already changed the CPU personality. git apply checks
+        # every context line atomically: leaving the reference name in0038
+        # silently dropped AKS and all dependent patches in the old dxb build.
+        text = text.replace('qcom,kryo470', 'arm,cortex-a510')
     if ios and patch.name.startswith('0031-'):
         # Retain writable-root selection, but never bypass dirty nonjournaled
         # HFS rejection. Integrated root requires a journaled HFSX header.
@@ -67,7 +72,7 @@ if ufs_probe:
     if ufs_block:
         names += ('vermeer_ufs_block.c', 'vermeer_gpt.h')
     if ios:
-        names += ('vermeer_ufs_ios.c', 'vermeer_media_policy.h')
+        names += ('vermeer_ufs_ios.c', 'vermeer_media_policy.h', 'vermeer_ios_bootstrap.c')
     for name in names:
         data = (source.parent / 'vermeer' / name).read_text()
         path = 'bsd/dev/' + name
@@ -75,6 +80,9 @@ if ufs_probe:
         generated += ''.join(difflib.unified_diff([], data.splitlines(True),
                                                 fromfile='/dev/null', tofile='b/' + path))
     (target / '0022-vermeer-ufs-read-probe-source.patch').write_text(generated)
+if ios:
+    shutil.copyfile(source.parent / 'vermeer/0023-vermeer-ios-bootstrap.patch',
+                    target / '0023-vermeer-ios-bootstrap.patch')
 if ramroot:
     stages = sorted(p for p in source.glob('*.sh') if int(p.name[:4]) <= last_patch)
     assert len(stages) == (3 if hfs_ramroot else 2), 'Unexpected staging scripts'

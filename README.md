@@ -41,6 +41,31 @@ and ASan/UBSan GPT/DMA/media-boundary checks passed. The repaired image was
 accepted by fastboot as a temporary boot; its screen result is pending. Existing
 root002 was retained and no partition was flashed again.
 
+Integrated002 photograph confirms the shared-cache wall is passed: launchd
+executes mount/restore/FIPS boot tasks, and the displayed corecrypto tests pass.
+It then reports `failed to load system bag`, requests recovery reboot, unmounts
+the HFS root and stops in `Halt/Restart Timed Out`. The old journal flush ENOTTY
+messages are absent from this shutdown. This does not yet prove sustained
+system-service startup or an interface.
+
+The actual CI log/tree revealed that0038 failed atomically after the earlier
+K70 CPU-personality edit changed its context. The external loader treated this
+as a warning and also skipped dependent0040/0043/0044/0045. Thus the prior local
+fuzzy-patch check and green compile did not establish those services existed.
+The new profile adapts the later context to `arm,cortex-a510`; every numbered
+project patch must now apply or the build stops. A final-kernel check also
+requires AKS/watchdog/crash-reason code. Strict `git apply` of all previously
+missing patches on the actual002 tree passes, and the artifact check correctly
+rejects the incomplete002 kernel.
+
+The next integration also encodes `no-effaceable-storage` as a u32 boolean and
+sets the SHA384 cryptex algorithm. An explicit `vermeer_prepare_root=1` boot
+option creates only missing first-boot test-keybag metadata before Apple init,
+through normal VFS calls on the UUID/geometry-guarded writable HFS root. Existing
+bags are never replaced. The data is an explicit lab marker for the passcode-free
+test AppleKeyStore, not an encrypted bag or a hardware security implementation.
+Six affected integration/IOKit source files pass local cross-compilation.
+
 The workflow is manual-only, has read-only repository permissions and a
 45-minute job limit. It does not contain Apple firmware or device dumps.
 

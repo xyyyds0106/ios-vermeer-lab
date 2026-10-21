@@ -60,6 +60,8 @@ def build(highram=False, ios=False):
     if ios:
         chosen = next(c for c in result.children if c.name == 'chosen')
         chosen.props.append(('boot-manifest-hash', 0, hashlib.sha384(b'vermeer experimental iOS root').digest()))
+        # libimg4's cryptex boot tasks need the digest algorithm as well.
+        chosen.props.append(('crypto-hash-method', 0, string('sha2-384')))
         # kern_csr.c reads lp-sip0 as u64 and lp-sip1 as u32. The copied
         # HFS root has no SF_RESTRICTED flag on dyld caches; vm_unix.c rejects
         # their shared mappings unless CSR_ALLOW_UNRESTRICTED_FS (bit1) is set.
@@ -69,7 +71,7 @@ def build(highram=False, ios=False):
             ('lp-sip0', u64(0x2)), ('lp-sip1', u32(1)),
         ]))
         defaults = next(c for c in result.children if c.name == 'defaults')
-        defaults.props.append(('no-effaceable-storage', 0, b''))
+        defaults.props.append(('no-effaceable-storage', 0, u32(1)))
     return result
 
 if __name__ == '__main__':

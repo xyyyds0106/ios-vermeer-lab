@@ -60,6 +60,7 @@ jobs:
           git init -q dxb
           git -C dxb fetch -q --depth 1 "$DXB_REPO" "$DXB_SHA"
           git -C dxb checkout -q FETCH_HEAD
+          python3 tools/strict_profile_patches.py dxb/build.sh
           # 12.5-14.3 use the top-level patches dir; ours go next to blacktop's
           if [ "$PROFILE" = vermeer-early ]; then
             python3 tools/prepare_vermeer.py xnu/patches .ci-patches
@@ -131,6 +132,10 @@ jobs:
           xcrun clang -target arm64-apple-ios16.0 -c vermeer-init.S -o vermeer-init.o
           python3 tools/mkinit.py vermeer-init.o out/vermeer-init
           (cd out && shasum -a 256 vermeer-init > INIT_SHA256)
+
+      - name: Verify required integrated services in the actual kernel
+        if: ${{ success() && env.PROFILE == 'vermeer-ios' }}
+        run: python3 tools/check_ios_kernel.py dxb/fakeroot/System/Library/Kernels/kernel.development.sweet
 
       - name: Package build tree for local compiles
         if: always()
