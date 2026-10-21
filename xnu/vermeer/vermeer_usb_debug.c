@@ -9,6 +9,7 @@
 #include <sys/systm.h>
 #include <kern/clock.h>
 #include <kern/thread.h>
+#include <mach/thread_act.h>
 #include <kern/sched_prim.h>
 #include <machine/machine_routines.h>
 #include <arm/caches_internal.h>
