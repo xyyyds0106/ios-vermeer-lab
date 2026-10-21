@@ -22,7 +22,9 @@ with tempfile.TemporaryDirectory() as folder:
         assert '+++ b/bsd/dev/'+name in all_patches
     assert '+++ b/bsd/dev/sweet_touch.c' not in all_patches
     assert '+++ b/bsd/dev/vermeer_rpmh_board.c' in all_patches
-    assert '+++ b/bsd/dev/vermeer_rpmh_pm.cpp' in all_patches
+    assert '+++ b/iokit/Kernel/arm/vermeer_rpmh_pm.cpp' in all_patches
+    assert 'iokit/Kernel/arm/vermeer_rpmh_pm.cpp\t\toptional iokitcpp' in all_patches
+    assert 'bsd/dev/vermeer_rpmh_pm.cpp' not in all_patches
     assert '\t(void)vermeer_rpmh_touch_start_from_adt();' in all_patches
     assert 'panic("VERMEER RPMH: demand sleep with retained ACTIVE-only votes")' in all_patches
     nongui=folder/'nongui'

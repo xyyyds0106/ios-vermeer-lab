@@ -4,7 +4,7 @@
 #if defined(ARM64_BOARD_CONFIG_SWEET)
 #include <IOKit/IOService.h>
 #include <IOKit/pwr_mgt/RootDomain.h>
-#include "vermeer_rpmh_board.h"
+#include "../../../bsd/dev/vermeer_rpmh_board.h"
 extern "C" int vermeer_rpmh_system_idle_hold(void)
 {
     static IOPMrootDomain *root;

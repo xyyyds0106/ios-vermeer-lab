@@ -1,12 +1,20 @@
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -113,4 +113,6 @@
+@@ -113,4 +113,5 @@
  bsd/dev/vermeer_touch_smmu_tables.c	standard
  bsd/dev/vermeer_touch_smmu_context.c	standard
 +bsd/dev/vermeer_rpmh_board.c		standard
-+bsd/dev/vermeer_rpmh_pm.cpp		standard
  bsd/dev/memdev.c			standard
  bsd/dev/mem.c				standard
+--- a/iokit/conf/files
++++ b/iokit/conf/files
+@@ -136,5 +136,6 @@
+ # Power Management
+ iokit/Kernel/RootDomainUserClient.cpp			optional iokitcpp
+ iokit/Kernel/IOPowerConnection.cpp			optional iokitcpp
++iokit/Kernel/arm/vermeer_rpmh_pm.cpp		optional iokitcpp
+ 
+ # System Management
 --- a/bsd/kern/bsd_init.c
 +++ b/bsd/kern/bsd_init.c
 @@ -1109,4 +1109,6 @@
