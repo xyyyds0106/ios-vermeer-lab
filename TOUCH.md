@@ -96,6 +96,31 @@ The fifth cell is not an execution-environment number. The provider declares
 static-gpii-mask1, GPII mask0x1e, EE register offset0x10000, and a1MiB IOVA pool
 starting0x100000. Do not mix it with the separate0x800000/SID0x436 provider.
 
+The next opt-in `vermeer_touch_gpi_probe=1` candidate records GPII0 TX/RX/event
+contexts and status-only IRQ/error registers. The downstream driver subtracts
+the DT EE offset from its mapped base before applying register constants:
+channel0 is therefore **0xa10000**, RX0xa10080 and event0xa11000. Adding the
+0x20000 context constant directly to DT0xa00000 would sample the wrong instance.
+Only a fixed32-register allowlist is sampled twice; valid means both reads
+completed and changed marks differing values. The first failed read immediately
+ends the scan, with no further provider access; later fields remain invalid.
+The worker retains its mapping/clock votes and checks wrapper/AHB readiness
+before each provider read. This does not establish GPI ownership or rail voltage.
+USB `input` prints
+the immutable published snapshot without accessing MMIO. A BEFORE marker makes
+an incomplete probe distinguishable from a completed all-zero sample. Native
+MMIO faults are not caught; absent completion remains unknown. No command,
+doorbell, IRQ clear, ring mapping or DMA transaction is issued by this probe.
+Even a stable unallocated context does not prove a resource lease.
+
+`vermeer_gpi.h` also builds an offline fixed-mode0/CS0/8-bit full-duplex SPI
+plan: CONFIG0, linked GO, TX DMA and RX DMA, retaining both IOVA address words.
+Its caller supplies actual mapped IOVAs; the builder performs no allocation,
+cache maintenance, MMIO, ring submission or HID publication. It is the command
+encoding foundation for a future GPI backend, not an operational transport.
+Host tests cover all1..1032-byte transfers, every read failure in both snapshot
+passes, every changed word, address wrap/overlap and clock-field bounds.
+
 `vermeer_touch_route.h` snapshots only the observed apps-SMMU geometry and
 fixed SIDa3/SIDb6 allowlist. Unknown layout or missing/ambiguous mapping is
 refused. It never creates a stream mapping or changes a context. A valid

@@ -86,7 +86,7 @@ rules. These changes do not claim GPU hardware initialization.
 
 The subsequent K70 temporary boot passed that clock preflight and identified SPI
 firmware with the FIFO interface disabled. Physical input therefore still needs
-the GENI internal-DMA transport and the verified K70 power/reset sequence. The
+the vendor GPI/GSI transport and the verified K70 power/reset sequence. The
 driver stopped before a touch transaction; it did not turn that into an input
 success. The upstream sheng probe's SMMU-bypass operation is also not a substitute
 for establishing ownership of this board's DMA stream/context.
@@ -119,6 +119,27 @@ accelerator. GMU power/firmware, owned GPU SMMU contexts, submission/fences,
 IOAccelerator/Metal ABI and scanout integration remain unfinished. Current
 images still render through CPU copies. No new GPU-enabled boot image is
 produced by these tests.
+
+## K70 hardware milestones
+
+Each stage needs its own device evidence before progressing. Current status is
+memory/packet foundations tested on the host; no GPU hardware stage has passed.
+
+| Stage | Minimum observable result | Gate before the next stage |
+| --- | --- | --- |
+| Identity and windows | Named K70 GPU/GMU/SMMU ranges resolved from this board; powered-domain chip ID read agrees with expected silicon | Establish clocks/power accessibility before reading GPU MMIO; a DT compatible is not a chip-ID read |
+| GMU power | Exact K70 CX/GX rails, GPUCC clocks and RSC/CMD-DB resource votes verified; bounded readiness response | Own each resource and retain failed/uncertain resources; do not import sheng register-window origins |
+| Firmware/HFI | Validate the board's selected firmware privately, start GMU, receive the expected HFI boot/version response | Correct mapping/cache visibility, timeouts and error retirement; firmware bytes never enter the source repo |
+| GPU memory | Owned GPU SMMU streams/context, hidden CPU-page padding and 4KB GPU mappings confirmed with a private scratch allocation | Real cache operations and device fences; host allocation tests alone do not establish hardware visibility |
+| Submission | Minimal reviewed PM4 job writes a known value to owned scratch memory and signals a matching fence | Timeout/error quarantine; no display-buffer use until this succeeds |
+| iOS frontend | Exact iOS16 ABI or translation frontend submits through the verified backend and retires buffers correctly | Metal/OpenGL unsupported operations return explicit errors; CPU framebuffer copies do not count as GPU execution |
+
+The initial test must preserve the working CPU display and root chain. Device
+evidence should carry stage, register-window origin, sampled/not-sampled state,
+firmware provenance and completion/error codes. Do not publish an accelerator
+service as operational merely because these foundations compile. The iOS16
+frontend may require translation; that work still depends on the power, GMU,
+SMMU, shader/command and completion stages above.
 
 NativeAdreno/NativeMetal/ArmSmmu4K use MIT and several platform kits use
 BSD-2-Clause-Patent. Apple images, device backups, private captures and extracted

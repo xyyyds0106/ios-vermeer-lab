@@ -19,6 +19,7 @@
 #include "vermeer_touch_route.h"
 #include "vermeer_goodix_info.h"
 #include "vermeer_touch_clock.h"
+#include "vermeer_gpi.h"
 extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
 extern void sweet_hid_touch(int,int,int,int);
 extern int sweet_hid_touch_ready(void);
@@ -38,9 +39,11 @@ static const unsigned vt_offsets[]={0x20,0x24,0x28,0x48,0x7c,0x224,0x22c,
     0x284,0x288,0x614,0x644,0x80c,0x810,0x814,0xe18,0xe1c,0xe30};
 #define VT_NREGS (sizeof(vt_offsets)/sizeof(vt_offsets[0]))
 static struct {
-    vm_offset_t se,gcc,gpio,smmu;
+    vm_offset_t se,gcc,gpio,smmu,gpi;
     uint32_t vote_added,pins[4],saved[VT_NREGS];
-    bool pins_saved,engine_saved,root_forced,fifo_owned;
+    bool pins_saved,engine_saved,root_forced,fifo_owned,gpi_probe;
+    struct vgp_snapshot gpi_snapshot;
+    unsigned _Atomic gpi_sample_ready;
     struct vg_bus bus;
     struct vt_info info;
     struct vt_frame contacts;
@@ -111,6 +114,18 @@ static void vt_status(void)
         os_atomic_load(&touch.gpi_reason,relaxed),os_atomic_load(&touch.gpi_matches,relaxed),
         os_atomic_load(&touch.gpi_slot,relaxed),os_atomic_load(&touch.gpi_smr,relaxed),
         os_atomic_load(&touch.gpi_s2cr,relaxed),os_atomic_load(&touch.gpi_cbar,relaxed),os_atomic_load(&touch.gpi_sctlr,relaxed));
+    if(os_atomic_load(&touch.gpi_sample_ready,acquire)) {
+        const struct vgp_snapshot *s=&touch.gpi_snapshot;
+        printf("VERMEER GPI: snapshot reason=%u valid=%08x changed=%08x provider=00a00000 instance=0 ee-offset=00010000\n",
+            s->reason,s->valid,s->changed);
+        for(unsigned c=0;c<3;c++) {
+            const uint32_t *p=&s->word[c*9];
+            printf("VERMEER GPI: context=%u cfg=%08x length=%08x base=%08x:%08x\n",c,p[0],p[1],p[3],p[2]);
+            printf("VERMEER GPI: context=%u rp=%08x:%08x wp=%08x:%08x scratch0=%08x\n",c,p[5],p[4],p[7],p[6],p[8]);
+        }
+        printf("VERMEER GPI: irq-type=%08x ch=%08x event=%08x global=%08x error=%08x lease=unavailable\n",
+            s->word[27],s->word[28],s->word[29],s->word[30],s->word[31]);
+    }
 }
 static int vt_reset_ready(void)
 {
@@ -140,6 +155,29 @@ static void vt_gpi_route_snapshot(void)
     VT_GPI_SAVE(reason);VT_GPI_SAVE(matches);VT_GPI_SAVE(slot);VT_GPI_SAVE(smr);
     VT_GPI_SAVE(s2cr);VT_GPI_SAVE(cbar);VT_GPI_SAVE(sctlr);
 #undef VT_GPI_SAVE
+}
+static int vt_gpi_read(void *ctx,unsigned offset,uint32_t *value)
+{
+    (void)ctx;
+    if(!touch.gpi || !value || offset>=0x60000 || (offset&3))return 0;
+    /* Mapping and clock votes are retained through this one-shot worker.
+     * Recheck the observed wrapper/AHB clocks before every provider read;
+     * a lost vote/readiness aborts the scan without another provider access.
+     * This is not a GPI ownership or rail-voltage proof. */
+    if(!touch.gcc || !vtc_ready(vt_rd(touch.gcc,VT_VOTE),
+        vt_rd(touch.gcc,vt_halt[0]),vt_rd(touch.gcc,vt_halt[1]),
+        vt_rd(touch.gcc,vt_halt[2]),vt_rd(touch.gcc,vt_halt[3]),
+        vt_rd(touch.gcc,vt_halt[4])))return 0;
+    *value=vt_rd(touch.gpi,offset);return 1;
+}
+static void vt_gpi_provider_snapshot(void)
+{
+    if(!touch.gpi_probe)return;
+    printf("VERMEER GPI: BEFORE read-only instance0 snapshot; no commands or doorbells\n");
+    touch.gpi=ml_io_map(0x00a00000,0x60000);
+    vgp_collect(NULL,touch.gpi?vt_gpi_read:NULL,&touch.gpi_snapshot);
+    /* Immutable after this release; USB reads only the retained snapshot. */
+    os_atomic_store(&touch.gpi_sample_ready,1,release);
 }
 static int vt_transfer(unsigned n)
 {
@@ -227,12 +265,14 @@ static int vt_engine_setup(void)
         proto,tx,rx,vt_rd(touch.gpio,24*0x1000+4),interface);
     unsigned transport=vtr_transport(proto,interface,inherited_dma_mode,gsi_events,status);
     if(transport==VTR_TRANSPORT_GPI_REQUIRED) {
+        (void)vt_reset_ready();
         touch.smmu=ml_io_map(0x15000000,0xd0000);
         if(!touch.smmu)return 0;
         /* qcom,spi-geni downstream requires GPI when FIFO is disabled.
          * K70 DT maps its provider a00000 via SIDb6; SIDa3 is wrapper DMA.
          * Observe both routes; never substitute internal DMA or add bypass. */
-        (void)vt_route_ready();vt_gpi_route_snapshot();(void)vt_reset_ready();
+        (void)vt_route_ready();vt_gpi_route_snapshot();vt_gpi_provider_snapshot();
+        printf("VERMEER TOUCH: power readiness=unknown; RPMh rail ownership unavailable; reset not released\n");
         printf("VERMEER TOUCH: GPI required by K70 vendor contract; internal DMA forbidden, GPI backend unavailable\n");
         return 0;
     }
@@ -362,6 +402,8 @@ void vermeer_touch_start(void)
        size!=sizeof("Redmi K70") || memcmp(value,"Redmi K70",size)) {
         printf("VERMEER TOUCH: physical-model guard refused\n");return;
     }
+    int probe=0;
+    touch.gpi_probe=PE_parse_boot_argn("vermeer_touch_gpi_probe",&probe,sizeof(probe)) && probe==1;
     os_atomic_store(&touch.stage,VT_WAIT,relaxed);vermeer_debug_input_register(vt_status);
     thread_t thread=THREAD_NULL;
     kern_return_t result=kernel_thread_start(vt_thread,NULL,&thread);
