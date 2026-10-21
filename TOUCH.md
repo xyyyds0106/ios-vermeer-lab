@@ -226,6 +226,15 @@ extend the exchange deadline. Host tests include all supported context IRQs,
 revocation/timeouts at every checkpoint, and valid/malformed IRQ ancestry.
 These are diagnostic guards, not evidence that the SPI failure is fixed.
 
+GUI019 completed the USB/power stages and again reached bank69/slot6 and GPI
+startup. Its last captured checkpoint preceded the200ms logging pause and
+`GENI_CLK_SEL` read; no read-complete, exchange-entry or panic record arrived,
+and the handset returned to Fastboot. The exact faulting instruction remains
+unknown. Pinned downstream `setup_config0_tre` reads that selector only for
+`qcom,le-vm`; the ordinary AP branch obtains its index/rate/divider through
+`get_spi_clk_cfg`. A native AP clock/DFS owner remains to be implemented and
+qualified; a fixed guessed selector is not a replacement.
+
 The GUI build registers two shared SMMU C objects (`vermeer_touch_smmu_tables.c`
 and `vermeer_touch_smmu_context.c`). GPU integration must reuse their exported
 ArmSmmu4K symbols instead of linking duplicate copies of the same sources.

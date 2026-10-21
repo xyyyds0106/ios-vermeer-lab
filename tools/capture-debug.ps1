@@ -18,7 +18,9 @@ function Find-DebugPort {
         if ($instance.PSChildName -ne 'K70DBG004') { continue }
         $params = Join-Path $instance.PSPath 'Device Parameters'
         $found = (Get-ItemProperty -LiteralPath $params -Name PortName -ErrorAction SilentlyContinue).PortName
-        if ($found -match '^COM[0-9]+$') { $found }
+        # Registry instances survive disconnect/reboot. Wait for the port to
+        # enumerate instead of trying to open the previous boot's stale name.
+        if ($found -match '^COM[0-9]+$' -and [IO.Ports.SerialPort]::GetPortNames() -contains $found) { $found }
     }
 }
 if ($ListOnly) { Find-DebugPort; return }
