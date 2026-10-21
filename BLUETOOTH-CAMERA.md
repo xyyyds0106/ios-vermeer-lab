@@ -162,6 +162,41 @@ For a reviewed integration, the platform owner should:
    This lane supplies the candidate, tests and source paths; it does not edit
    the USB command handler or shared profile generator.
 
+## Next build worker candidate
+
+`vermeer_media_probe.c` and `vermeer_media_probe.h` supply an unlinked,
+default-off worker for a future reviewed image. With `vermeer_media_probe=1`,
+the worker accepts only `media bt`, `media camera` and `media all`. The USB
+callback only validates and queues a fixed field mask; the serialized worker
+performs collection and emits the existing VMT1 record format. Without an
+actual platform provider, collection is gated and performs zero device reads.
+The current GUI012 image does not contain this worker or its commands.
+
+`vermeer_media_probe_bind` accepts one immutable permanent provider. Its
+`begin(context, requested_mask, access)` borrows the already verified mapping
+and domain references for that field mask; `end(context)` releases them after
+every successful borrow, including failed capture paths. A failed begin cleans
+up its own partial acquisition. These callbacks must not create mappings,
+enable power/clocks, modify pins, or access UART/CCI/PMIC. A supplied access
+object still undergoes all VMT window/proof checks; binding a provider does not
+bypass those checks. A BT-only window cannot service camera fields.
+
+`tools/make_media_probe_hooks.py output.patch` generates a separate,
+**unapplied** repository patch plus a manifest of its owner-file hashes. It
+adds a dedicated media callback slot in the debug router, preserving the
+existing restart/baseband control callback. It also adds GUI-only source
+staging and startup hooks. It writes no owner files. The integration owner
+must review the baseline hashes, apply the patch in its own integration
+checkout, then run GUI isolation, strict kernel patch application and the
+full build before including the opt-in flag in a new image. Regenerate after
+owner-file changes rather than forcing a stale patch.
+
+The supplied provider lifecycle host test covers missing/failed providers,
+correct lease release on every injected read failure, short mapping rejection
+and fixed commands that contain no addresses. The wrapper never calls the
+standard Bluetooth identity query; a real awake owned UART remains a separate
+prerequisite. Actual identity/CCI reads must not be requested from GUI012.
+
 ## Camera identity and the minimum observation
 
 The retained FDT supplies four generic sensor/EEPROM slots, not verified
@@ -201,8 +236,9 @@ enough to select a sensor driver.
 
 ## Validation and integration status
 
-`CC=clang-14 sh tests/run-media-tests.sh` runs H4, identity and TLMM adapter
-tests under ASan/UBSan plus nine FDT and five CDC record tests. Identity coverage includes all
+`CC=clang-14 sh tests/run-media-tests.sh` runs H4, identity, TLMM adapter and
+provider lifecycle tests under ASan/UBSan plus nine FDT and five CDC record
+tests. Identity coverage includes all
 write chunk sizes 1..4/read chunk sizes 1..64, absent responses, deadlines during
 I/O, backwards/stalled clocks, invalid responses, reentry, revoked ownership,
 duplicate responses and every UART snapshot read failure. TLMM tests reject
@@ -212,6 +248,13 @@ Every read failure and mid-read revocation is injected, with no later read.
 Record tests decode the actual C encoder, check measured zero versus missing,
 and reject broken/changed replays. The media workflow tracks these headers
 and tests independently of the kernel workflow.
+
+The native worker and portable headers pass syntax compilation with the
+retained K70 ARM64/16KB XNU recipe, with the K70 board macro explicitly checked.
+An independent copy of the owner files generates the proposed GUI source/start
+hooks, excludes them from the non-GUI profile and preserves valid nested patch
+syntax. Full kernel linking and strict application against the next actual
+build tree remain the integration owner's checks after reviewing the hooks.
 
 Kernel registration, a UART byte adapter, power sequencing, firmware startup,
 the iOS Bluetooth interface, sensor identification and camera capture remain

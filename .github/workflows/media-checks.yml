@@ -8,12 +8,16 @@ on:
       - xnu/vermeer/vermeer_bt_identity.h
       - xnu/vermeer/vermeer_bt_observe.h
       - xnu/vermeer/vermeer_media_tlmm.h
+      - xnu/vermeer/vermeer_media_probe.h
+      - xnu/vermeer/vermeer_media_probe.c
       - tools/media_inventory.py
       - tests/bt_h4_test.c
       - tests/bt_identity_test.c
       - tests/media_tlmm_test.c
+      - tests/media_probe_test.c
       - tests/media_records_test.py
       - tools/media_records.py
+      - tools/make_media_probe_hooks.py
       - tests/media_inventory_test.py
       - tests/run-media-tests.sh
   pull_request:
@@ -23,12 +27,16 @@ on:
       - xnu/vermeer/vermeer_bt_identity.h
       - xnu/vermeer/vermeer_bt_observe.h
       - xnu/vermeer/vermeer_media_tlmm.h
+      - xnu/vermeer/vermeer_media_probe.h
+      - xnu/vermeer/vermeer_media_probe.c
       - tools/media_inventory.py
       - tests/bt_h4_test.c
       - tests/bt_identity_test.c
       - tests/media_tlmm_test.c
+      - tests/media_probe_test.c
       - tests/media_records_test.py
       - tools/media_records.py
+      - tools/make_media_probe_hooks.py
       - tests/media_inventory_test.py
       - tests/run-media-tests.sh
 permissions:
