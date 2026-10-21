@@ -166,3 +166,13 @@ test above. Preserve the confirmed003/006 images, stock backups and failed-test
 evidence. Destructive storage operations still need concrete per-step approval.
 An official16.7.16/20H392 root candidate is prepared and checked offline; it has
 not been flashed or booted. No Apple userspace/iOS GUI is verified on this K70.
+
+Standalone probe011 now photograph-confirms32768 sparse high-RAM samples over
+0x8c0000000..0x940000000 (2GiB), both pattern/restoration counters zero, with
+16KiB stage1 mappings. This checks sparse addressability only. `mkvermeeradt.py
+--highram` and the boot shim now support that exact profile, retaining the
+256MiB default. Before any high-RAM segment copy, the shim validates the live
+FDT memory ranges and fixed reservations with the bounded probe011 guard.
+Unknown profiles fail. Initial high-RAM XNU tests use the proven32MiB HFS RAM
+disk and source PID1, with UFS opt-in omitted: the current transport's DMA
+allocation is restricted to low RAM, so high-address DMA remains untested.

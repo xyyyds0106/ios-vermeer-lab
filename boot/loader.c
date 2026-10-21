@@ -11,6 +11,7 @@
 #include "console.h"
 #include "fdt.h"
 #include "loader.h"
+#include "ram_guard.h"
 
 #define BOOT_LINE_LENGTH	608
 #define PAGE_16K		0x4000UL
@@ -103,8 +104,17 @@ const char *loader_boot(uintptr_t dtb)
 	    sizeof(*p) + p->nsegs * sizeof(struct payload_seg) > available ||
 	    p->adt_off > available || p->adt_size > available - p->adt_off)
 		return "payload bounds invalid";
-	if (p->phys_base != 0xc0000000 || p->mem_size != 0x10000000)
+	int highram = p->phys_base == HIGH_RAM_LO && p->mem_size == HIGH_RAM_HI - HIGH_RAM_LO;
+	if (!highram && (p->phys_base != 0xc0000000 || p->mem_size != 0x10000000))
 		return "RAM profile mismatch";
+	if (highram) {
+		/* Fail before copying any segment into high RAM. The guard was tested
+		 * under ASan/UBSan and probe011 checked this physical range on K70.
+		 */
+		if (dtb < 0xb5d00000 || dtb >= 0xb5f00000 || (dtb & 7) ||
+		    ram_guard((const uint8_t *)dtb, 0xb5f00000 - dtb, HIGH_RAM_LO, HIGH_RAM_HI))
+			return "high RAM live FDT guard refused";
+	}
 	if (p->kernel_end < p->virt_base || p->kernel_end - p->virt_base > p->mem_size)
 		return "kernel end outside RAM";
 	uint64_t lo = p->phys_base, hi = lo + p->mem_size;
@@ -126,7 +136,8 @@ const char *loader_boot(uintptr_t dtb)
 		return "entry outside loaded segments";
 
 	uint64_t pa_of_va_base = p->phys_base - p->virt_base;	/* pa = va + this */
-	con_hex2("PHYS", "base=", p->phys_base, "size=", p->mem_size);
+	con_hex("PHYS", p->phys_base);
+	con_hex("MEMSIZE", p->mem_size);
 	con_hex("VIRT", p->virt_base);
 	con_hex("ENTRY", p->entry_va);
 
@@ -145,7 +156,8 @@ const char *loader_boot(uintptr_t dtb)
 		if (s->vmsize > s->file_size)
 			zero64(dst + ((s->file_size + 7) & ~7UL), s->vmsize - ((s->file_size + 7) & ~7UL));
 	}
-	con_hex2("SEGS", "n=", p->nsegs, "end=", p->kernel_end + pa_of_va_base);
+	con_hex("SEGS", p->nsegs);
+	con_hex("DATAEND", p->kernel_end + pa_of_va_base);
 
 	/* ADT, then boot_args, behind the kernel; everything below topOfKernelData is ours. */
 	uintptr_t adt_pa = p->kernel_end + pa_of_va_base;
@@ -172,7 +184,8 @@ const char *loader_boot(uintptr_t dtb)
 	for (int i = 0; i < BOOT_LINE_LENGTH; i++)
 		ba->CommandLine[i] = p->cmdline[i];
 	ba->memSizeActual = p->mem_size;
-	con_hex2("BOOTARG", "pa=", ba_pa, "top=", top);
+	con_hex("BOOTARG", ba_pa);
+	con_hex("TOP", top);
 
 	uintptr_t entry_pa = p->entry_va + pa_of_va_base;
 	con_hex("JUMP", entry_pa);
