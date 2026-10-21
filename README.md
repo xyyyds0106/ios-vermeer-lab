@@ -66,6 +66,15 @@ bags are never replaced. The data is an explicit lab marker for the passcode-fre
 test AppleKeyStore, not an encrypted bag or a hardware security implementation.
 Six affected integration/IOKit source files pass local cross-compilation.
 
+Integrated003 source `2206cc7`, Actions39536101467 succeeded, including the
+actual-kernel service check. The real CI log confirms all five formerly skipped
+patches applied and zero numbered project patches skipped. Kernel SHA256
+`8b3053708227d72b436be9101b077acc3ca03904749ef95ef9885df4be63b171`;
+boot SHA256 `72bdc02136cd487b0db7f714f72aedc796e9f07108b16b8f4fd52e561d28f587`.
+Packaging verifies the new metadata properties and explicit preparation opt-in.
+Fastboot accepted the temporary boot; hardware keybag/startup results remain
+pending. The existing root002 volume was retained without another partition flash.
+
 The workflow is manual-only, has read-only repository permissions and a
 45-minute job limit. It does not contain Apple firmware or device dumps.
 
