@@ -34,7 +34,17 @@ Commands, each followed by a newline:
 `-ObserveFrames` makes the capture tool query `frame`/`input` every ten seconds
 while continuing to collect logs on the same serial connection. Both callbacks
 read counters only; they do not take a display/HID lock or access hardware.
-The new counters still require GUI009 real-device validation.
+GUI009 validates these queries on the handset, including after the user reports
+a frozen Hello picture. Timer ticks continue while submission/presentation
+counts stay constant and input counts remain zero. Counter continuity does not
+prove visible animation or working touch.
+
+The next touch candidate extends `input` with an atomic physical-driver status:
+stage1 waits for HID,2 clocks,3 sequencer firmware,4 controller identity,
+5 ready,6 stopped. Report/checksum/transaction/emitted-event counts and the last
+header distinguish controller failures from missing HID dispatch. Reading this
+status never accesses MMIO or the HID lock. The physical SPI worker runs only
+with the separate `vermeer_touch=1` boot option; the USB query cannot enable it.
 
 The GUI007 sampler records saved user thread stacks and bounded dyld64 private
 image paths/bases, allowing migration-plugin addresses to be symbolicated.

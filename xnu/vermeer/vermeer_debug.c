@@ -10,6 +10,7 @@ typedef int (*vermeer_sample_request_fn)(void);
 static vermeer_sample_request_fn _Atomic sample_request;
 typedef void (*vermeer_frame_status_fn)(void);
 static vermeer_frame_status_fn _Atomic frame_status;
+static vermeer_frame_status_fn _Atomic input_status;
 static uint64_t _Atomic input_calls,input_dispatches;
 void vermeer_debug_append(const char *data, int size);
 unsigned vermeer_debug_copy(uint64_t *pos, char *out, unsigned max);
@@ -21,6 +22,7 @@ void vermeer_debug_frame_register(vermeer_frame_status_fn);
 int vermeer_debug_frame_request(void);
 void vermeer_debug_input_record(int);
 void vermeer_debug_input_status(void);
+void vermeer_debug_input_register(vermeer_frame_status_fn);
 void vermeer_debug_append(const char *data, int size)
 {
     if (size<=0) return;
@@ -78,6 +80,11 @@ void vermeer_debug_input_record(int dispatched)
 }
 void vermeer_debug_input_status(void)
 {
-    printf("VERMEER INPUT: touch-calls=%llu hid-dispatches=%llu; physical driver not registered\n",
+    printf("VERMEER INPUT: touch-calls=%llu hid-dispatches=%llu\n",
         os_atomic_load(&input_calls,relaxed),os_atomic_load(&input_dispatches,relaxed));
+    vermeer_frame_status_fn callback=os_atomic_load(&input_status,acquire);
+    if(callback)callback();
+    else printf("VERMEER TOUCH: physical driver not registered\n");
 }
+void vermeer_debug_input_register(vermeer_frame_status_fn callback)
+{ os_atomic_store(&input_status,callback,release); }

@@ -1,0 +1,70 @@
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -108,6 +108,7 @@
+ bsd/dev/vermeer_debug.c			standard
+ bsd/dev/vermeer_usb_debug.c		standard
+ bsd/dev/sweet_sample.c			standard
++bsd/dev/vermeer_touch.c			standard
+ bsd/dev/memdev.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -1106,6 +1106,8 @@
+ 	vermeer_usb_debug_start();
+ 	extern void sweet_sample_start(void);
+ 	sweet_sample_start();
++	extern void vermeer_touch_start(void);
++	vermeer_touch_start();
+ #endif
+ 
+ 	load_init_program(p);
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -17,6 +17,7 @@
+  * every N seconds, to test the event path without input hardware.
+  */
+ #include <IOKit/IOLib.h>
++#include <machine/atomic.h>
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOTimerEventSource.h>
+ #include <libkern/c++/OSArray.h>
+@@ -366,7 +367,7 @@
+ OSDefineMetaClassAndStructors(SweetHIDTouch, IOHIDEventService);
+ 
+ static SweetHIDButtons *gSweetButtons;
+-static SweetHIDTouch *gSweetTouch;
++static SweetHIDTouch *_Atomic gSweetTouch;
+ 
+ bool
+ SweetHIDButtons::start(IOService *provider)
+@@ -426,7 +427,8 @@
+ 	setProperty("DisplayIntegrated", kOSBooleanTrue);
+ 	setProperty("SurfaceWidth", (unsigned long long)(68 << 16), 32);	/* mm, 16.16 */
+ 	setProperty("SurfaceHeight", (unsigned long long)(151 << 16), 32);
+-	gSweetTouch = this;
++	this->retain();
++	os_atomic_store(&gSweetTouch, this, release);
+ 	registerService();
+ 	IOLog("SWEET HID: touch registered\n");
+ 	return true;
+@@ -541,7 +543,15 @@
+ extern "C" void
+ sweet_hid_touch(int finger, int down, int x, int y)
+ {
+-	if (gSweetTouch) {
+-		gSweetTouch->touch(finger, down != 0, x, y);
+-	}
+-}
++	SweetHIDTouch *service = os_atomic_load(&gSweetTouch, acquire);
++	if (service) {
++		service->touch(finger, down != 0, x, y);
++	}
++}
++
++/* Service has a permanent retain before publication to the input worker. */
++extern "C" int
++sweet_hid_touch_ready(void)
++{
++	return os_atomic_load(&gSweetTouch, acquire) != NULL;
++}

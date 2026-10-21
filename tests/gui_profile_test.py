@@ -12,8 +12,14 @@ with tempfile.TemporaryDirectory() as folder:
     all_patches=''.join(p.read_text(errors='surrogateescape') for p in profile.glob('*.patch'))
     assert '+++ b/bsd/dev/sweet_ufs.c' not in all_patches
     assert 'SWEETLOG' not in all_patches
-    for name in ('0046-','0050-','0058-','0059-','0060-','0061-','0062-','0063-','0064-','0065-','0066-','0068-'):
+    for name in ('0046-','0050-','0058-','0059-','0060-','0061-','0062-','0063-','0064-','0065-','0066-','0067-','0068-'):
         assert any(p.name.startswith(name) for p in profile.iterdir())
+    assert '+++ b/bsd/dev/vermeer_touch.c' in all_patches
+    assert '+++ b/bsd/dev/sweet_touch.c' not in all_patches
+    nongui=folder/'nongui'
+    subprocess.run([sys.executable,str(root/'tools/prepare_vermeer.py'),
+                    str(root/'xnu/patches'),str(nongui),'--ios'],check=True)
+    assert not any('vermeer_touch.c' in p.read_text(errors='surrogateescape') for p in nongui.glob('*.patch'))
     firmware=mkvermeeradt.node('device-tree',children=[mkvermeeradt.node('product',[
         ('product-name',b'iPhone\0')])])
     product=folder/'generic-product.adt';product.write_bytes(adt.serialize(firmware))

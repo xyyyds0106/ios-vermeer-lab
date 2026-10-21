@@ -10,7 +10,7 @@ the picture stops changing after a finger swipe. USB ping and queued snapshots
 still work in that state. This is a visible setup milestone; hardware touch,
 stable transitions and Adreno/Metal acceleration are not yet demonstrated.
 
-The GUI009 candidate fixes a display-buffer lifetime gap: pending swaps retain
+GUI009 (`7228f85`, Actions39558963277) fixes a display-buffer lifetime gap: pending swaps retain
 their surfaces until the delayed panel copy, including when userspace releases
 them or a newer frame supersedes them. Signed scrolling rectangles are clipped
 against both source storage and the panel without resetting unrelated axes.
@@ -18,7 +18,20 @@ Host tests exercise release-before-present, replacement during a copy and
 200,000 clipped-copy cases. Read-only `frame`/`input` counters distinguish
 submission, panel copy and HID dispatch. These changes do not register a GPU or
 a physical touch controller. Local affected-source compiles and host checks
-pass; the complete build and real-device result are pending.
+pass, as does the complete build. The real handset reaches Hello, but the user
+still reports a frozen picture after swiping. Counters remain at1868 submissions
+and271 presentations with continued timer ticks, no missing/rejected surfaces,
+and zero touch entries/HID dispatches. Setup and SpringBoard main threads remain
+in their event loops. This does not demonstrate a system deadlock or working
+physical input; the original symptom remains unresolved.
+
+The next integrated candidate adds an opt-in [K70 physical touch driver](TOUCH.md)
+for SPI SE4/GT9916. Controller identity, IC information, native axes and every
+complete report are checked before HID publication. It reuses ABL controller
+firmware and rails, uses polled FIFO transfers with bounded timeouts, and stops
+on unsupported hardware state. Local host checks and affected-source compiles
+pass; the new hardware path is not yet tested. Native Adreno/Metal acceleration
+remains unimplemented; these changes do not advertise a GPU service.
 
 GUI007 (`a6a6ddb`, Actions39549812373) boots with continued display swaps and
 passes read-only USB manual sampling, image maps and post-sample liveness.
