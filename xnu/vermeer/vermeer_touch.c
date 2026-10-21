@@ -55,6 +55,7 @@ static struct {
     unsigned manual_mode;unsigned _Atomic manual_phase;
     vm_offset_t dma_va;uint64_t dma_pa;
     struct vgpt transport;struct vti iommu;struct vtr_route identity_route;
+    struct vtc_dfs_snapshot dfs;struct vtc_gpi_clock gpi_clock;bool dfs_ready;
     const struct vtp_ops *power;
     unsigned _Atomic gpi_phase,gpi_error,gpi_events,gpi_commands,gpi_retired,iommu_error;
     unsigned _Atomic iommu_mode,iommu_bank,iommu_slot,iommu_fsr;
@@ -216,13 +217,10 @@ static int vt_transfer(unsigned n)
     int ok;
     if(touch.use_gpi) {
         unsigned first=!touch.transport.exchanges;
-        if(first){printf("VERMEER GPI CHECKPOINT: GENI_CLK_SEL read begin\n");
-            if(touch.manual_mode==2)vt_sleep(200);}
-        /* The pinned spi-msm-geni GPI path uses the real GENI_CLK_SEL in
-         * CONFIG0 clock-source bits. Keep that input; do not guess a parent. */
-        unsigned source=vt_rd(touch.se,0x7c)&7u;
-        if(first)printf("VERMEER GPI CHECKPOINT: GENI_CLK_SEL read complete source=%u; exchange call next\n",source);
-        ok=vgpt_exchange(&touch.transport,touch.tx,touch.rx,n,source,128);
+        if(first)printf("VERMEER GPI CHECKPOINT: AP DFS level=%u divider=%u source-hz=%u spi-hz=%u; exchange call next\n",
+            touch.gpi_clock.level,touch.gpi_clock.divider,touch.gpi_clock.source_hz,touch.gpi_clock.spi_hz);
+        if(!touch.dfs_ready || !vtg_lease(NULL))return 0;
+        ok=vgpt_exchange(&touch.transport,touch.tx,touch.rx,n,touch.gpi_clock.level,touch.gpi_clock.divider);
     } else ok=vg_transfer(&touch.bus,touch.tx,touch.rx,n);
     if(touch.use_gpi)vtg_status();
     os_atomic_store(&touch.spi_phase,touch.bus.phase,relaxed);os_atomic_store(&touch.spi_irq,touch.bus.last_irq,relaxed);

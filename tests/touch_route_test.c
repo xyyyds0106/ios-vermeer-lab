@@ -18,6 +18,11 @@ static void make(void)
 }
 int main(void)
 {
+    for(unsigned bits=0;bits<4;bits++) {
+        unsigned cfg=(bits&1?1u<<11:0)|(bits&2?1u<<12:0);
+        assert(vtr_pin_owned(cfg)==(bits!=1));
+        assert(vtr_pin_owned(cfg|0x3ffu)==(bits!=1));
+    }
     struct vtr_route r;
     make();assert(vtr_identity(regs,read_reg,&r) && r.reason==VTR_OK && r.matches==1 && !context_reads);
     for(unsigned bank=0;bank<70;bank++) {

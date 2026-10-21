@@ -235,6 +235,24 @@ unknown. Pinned downstream `setup_config0_tre` reads that selector only for
 `get_spi_clk_cfg`. A native AP clock/DFS owner remains to be implemented and
 qualified; a fixed guessed selector is not a replacement.
 
+The next candidate removes that serial selector read from GPI transfers.
+It verifies this boot's wrapper, GCC, RPMh clock and76.8MHz fixed-XO chain,
+rejects LE/LA-VM and shared-SE/EE configurations, and captures all eight GCC
+DFS entries twice while holding the existing clock/power/PM reservation.
+Only an actual XO bypass entry is accepted; its hardware level index and
+divider128 produce a nominal150kHz SPI request. The selected entry and control
+are revalidated during transfers. No PLL, GCC frequency or DFS-table writes
+are added. Missing/changed/unsupported clock state stops before DMA setup.
+Kalama eGPIO ownership is also checked before pin changes.
+
+The [giulia reference](https://github.com/jasper2863/UniXNU-giulia/tree/5add58dda33db304d7eba0763a7173452f48ac39)
+uses the earlier Vermeer GUI integration with Ace5 geometry and a Synaptics
+TouchCom protocol. Its ClockDxe handoff and optional GPIO backend are useful
+references, but its SM8650 clock offsets, GPIO48..51 and S3910 packets are not
+the K70 hardware contract. Its published status does not establish working
+GPI DMA, physical touch or GPU acceleration. This candidate retains K70
+GPIO44..47, GT9916 validation and the existing GUI/kernel packaging checks.
+
 The GUI build registers two shared SMMU C objects (`vermeer_touch_smmu_tables.c`
 and `vermeer_touch_smmu_context.c`). GPU integration must reuse their exported
 ArmSmmu4K symbols instead of linking duplicate copies of the same sources.

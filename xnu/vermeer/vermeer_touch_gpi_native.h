@@ -74,6 +74,41 @@ static int vtg_now(void *ctx,uint64_t *out)
 {(void)ctx;uint64_t ns;absolutetime_to_nanoseconds(mach_absolute_time(),&ns);*out=ns/NSEC_PER_USEC;return 1;}
 static int vtg_pause(void *ctx,unsigned us)
 {(void)ctx;if(us!=20)return 0;delay(us);return 1;}
+static int vtg_dfs_owned(void *ctx)
+{
+    (void)ctx;return touch.gpi_claimed && touch.power_held && touch.power &&
+        touch.power->valid(touch.power->ctx)==1 && vtg_clock_ready() && vtg_irqs_ready();
+}
+static int vtg_dfs_read(void *ctx,unsigned off,uint32_t *out)
+{
+    (void)ctx;if(!out || (off!=0x14 && (off<0x1c || off>0x38 || (off&3))) || !vtg_dfs_owned(NULL))return 0;
+    *out=vt_rd(touch.gcc,VT_RCG+off);return 1;
+}
+static int vtg_dfs_valid(void)
+{
+    if(!touch.dfs_ready)return 0;
+    uint32_t control,selected;
+    if(!vtg_dfs_read(NULL,0x14,&control) || !vtg_dfs_read(NULL,0x1c+4*touch.gpi_clock.level,&selected))return 0;
+    return vtc_dfs_live(&touch.dfs,&touch.gpi_clock,control,selected);
+}
+static int vtg_dfs_prepare(void)
+{
+    printf("VERMEER TOUCH PHASE: AP DFS snapshot begin; no serial clock-selector read\n");
+    if(touch.manual_mode==2)vt_sleep(200);
+    const struct vtc_dfs_ops io={NULL,vtg_dfs_owned,vtg_dfs_read,vtg_now};
+    int status=vtc_dfs_collect(&io,&touch.dfs);
+    if(status){printf("VERMEER TOUCH CLOCK: DFS snapshot refused status=%d\n",status);return 0;}
+    printf("VERMEER TOUCH CLOCK: DFS control=%08x cfg=%08x/%08x/%08x/%08x/%08x/%08x/%08x/%08x\n",
+        touch.dfs.control,touch.dfs.cfg[0],touch.dfs.cfg[1],touch.dfs.cfg[2],touch.dfs.cfg[3],
+        touch.dfs.cfg[4],touch.dfs.cfg[5],touch.dfs.cfg[6],touch.dfs.cfg[7]);
+    if(!vtc_dfs_choose(&touch.dfs,&touch.gpi_clock)) {
+        printf("VERMEER TOUCH CLOCK: no qualified XO DFS entry; no guessed selector or PLL change\n");return 0;
+    }
+    touch.dfs_ready=true;
+    printf("VERMEER TOUCH PHASE: AP DFS qualified level=%u source-hz=%u divider=%u spi-hz=%u\n",
+        touch.gpi_clock.level,touch.gpi_clock.source_hz,touch.gpi_clock.divider,touch.gpi_clock.spi_hz);
+    return vtg_dfs_valid();
+}
 static int vtg_cache(void *ctx,void *cpu,size_t bytes,unsigned op)
 {
     (void)ctx;uintptr_t p=(uintptr_t)cpu;
@@ -98,7 +133,7 @@ static int vtg_quiet(void *ctx)
 {
     (void)ctx;
     if(!touch.gpi || !touch.se || !vtg_clock_ready() || !vtg_power_valid() || !vtg_irqs_ready() ||
-       (touch.dma_va && !vtg_pages()) || (vt_rd(touch.se,VG_STATUS)&0x1001))return 0;
+       (touch.dfs_ready && !vtg_dfs_valid()) || (touch.dma_va && !vtg_pages()) || (vt_rd(touch.se,VG_STATUS)&0x1001))return 0;
     /* Pinned provider assigns Apps EE static mask1 + dynamic mask1e.
      * max-num-gpii=12 is NOT permission to read other EEs' instances5..11.
      * All five assigned instances must be unallocated with NO retained rings.
@@ -177,7 +212,7 @@ static int vtg_lease(void *ctx)
 {
     (void)ctx;
     return touch.gpi_claimed && touch.gpi && touch.se && touch.smmu && vtg_clock_ready() &&
-        vtg_pages() && vtg_power_valid() && vtg_irqs_ready() && ((vt_rd(touch.se,0x68)>>8)&255)==1 &&
+        vtg_pages() && vtg_power_valid() && vtg_irqs_ready() && vtg_dfs_valid() && ((vt_rd(touch.se,0x68)>>8)&255)==1 &&
         (vt_rd(touch.se,0x64)&1) && vtg_route_live();
 }
 static int vtg_read(void *ctx,unsigned off,uint32_t *out)
@@ -239,6 +274,13 @@ static int vtg_prepare(void)
         printf("VERMEER TOUCH: GPI provider not exclusively quiescent; no takeover\n");return 0;
     }
     touch.gpi_claimed=true;
+    for(unsigned i=0;i<4;i++) {
+        touch.pins[i]=vt_rd(touch.gpio,(44+i)*0x1000);
+        if(!vtr_pin_owned(touch.pins[i])) {
+            printf("VERMEER TOUCH: GPIO%u assigned to external eGPIO controller; no pin writes\n",44+i);return 0;
+        }
+    }
+    if(!vtg_dfs_prepare())return 0;
     if(PAGE_SIZE!=16384 || kmem_alloc_contig(kernel_map,&touch.dma_va,6*PAGE_SIZE,PAGE_MASK,0,0,
         KMA_DATA|KMA_ZERO|KMA_PERMANENT,VM_KERN_MEMORY_IOKIT)!=KERN_SUCCESS)return 0;
     ppnum_t pn=pmap_find_phys(kernel_pmap,(addr64_t)touch.dma_va);if(!pn)return 0;
@@ -281,7 +323,8 @@ static int vtg_prepare(void)
     if(!vgpt_start(&touch.transport)){vtg_status();return 0;}
     printf("VERMEER TOUCH PHASE: GPI start complete\n");
     for(unsigned i=0;i<4;i++) {
-        unsigned reg=(44+i)*0x1000;touch.pins[i]=vt_rd(touch.gpio,reg);
+        unsigned reg=(44+i)*0x1000;
+        if(vt_rd(touch.gpio,reg)!=touch.pins[i])goto failed;
         if(!vtg_lease(NULL))goto failed;
         vt_wr(touch.gpio,reg,(touch.pins[i]&~0x3ffu)|4u|(2u<<6)|(i==3?3u:1u));
     }

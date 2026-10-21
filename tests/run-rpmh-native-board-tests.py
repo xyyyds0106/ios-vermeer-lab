@@ -55,3 +55,21 @@ with tempfile.TemporaryDirectory() as tmp:
                 env={**os.environ,'UBSAN_OPTIONS':'halt_on_error=1'})
             cases+=1
     print(f'Native FDT IRQ ancestry: {cases} parent/nexus override cases PASS',flush=True)
+    clock_cases=[]
+    for path in ('/','/soc','/soc/qcom,qupv3_1_geni_se@ac0000',
+                 '/soc/qcom,qupv3_1_geni_se@ac0000/spi@a90000'):
+        for key in ('qcom,le-vm','qcom,la-vm','qcom,shared_se','qcom,shared_ee'):
+            clock_cases.append((path,key,b'',19))
+    clock_cases += [
+        ('/soc/clocks/xo_board','clock-frequency',bytes.fromhex('0124f800'),11),
+        ('/soc/clocks/xo_board','clock-output-names',b'other_xo\0',11),
+        ('/soc/clock-controller@100000','clocks',bytes(40),11),
+        ('/soc/qcom,qupv3_1_geni_se@ac0000/spi@a90000','clocks',bytes(8),11),
+        ('/soc','phandle',bytes.fromhex('00000037'),13),
+        ('/soc','phandle',bytes.fromhex('00000038'),13),
+        ('/soc','phandle',bytes.fromhex('000003ab'),13)]
+    for path,key,value,expected in clock_cases:
+        changed=out/'clock-override.dtb';changed.write_bytes(fixture(((path,key,value),)))
+        subprocess.run([str(out/'native'),str(changed),str(expected)],check=True,
+            env={**os.environ,'UBSAN_OPTIONS':'halt_on_error=1'})
+    print(f'Native AP clock chain: {len(clock_cases)} VM/shared/oscillator/provider/alias refusal cases PASS',flush=True)

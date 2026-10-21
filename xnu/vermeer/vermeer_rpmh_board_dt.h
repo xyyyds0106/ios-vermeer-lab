@@ -22,6 +22,7 @@ static inline int vrb_dt_check(const uint8_t *f,size_t available)
     uint8_t seen[VRB_RULE_COUNT]={0},node_seen[VRB_RULE_COUNT]={0};
     char path[512];size_t lengths[64],used=0,limit=at+size;unsigned depth=0,roots=0;
     unsigned gpio_phandles=0,avdd_phandles=0,iovdd_phandles=0,gic_phandles=0;
+    unsigned gcc_phandles=0,rpmh_clock_phandles=0,xo_phandles=0;
     while(at<limit) {
         if(limit-at<4)return 3;
         uint32_t token=vrb_be32(f+at);at+=4;
@@ -53,7 +54,11 @@ static inline int vrb_dt_check(const uint8_t *f,size_t available)
                 uint32_t v=vrb_be32(f+at);gpio_phandles+=v==0x79;
                 avdd_phandles+=v==0x2ec;iovdd_phandles+=v==0x2a;
                 gic_phandles+=v==1;
+                gcc_phandles+=v==0x37;rpmh_clock_phandles+=v==0x38;xo_phandles+=v==0x3ab;
             }
+            if(vrb_ancestor(path,used,"/soc/qcom,qupv3_1_geni_se@ac0000/spi@a90000") &&
+               (vrb_string(f+strings+no,nn,"qcom,le-vm") || vrb_string(f+strings+no,nn,"qcom,la-vm") ||
+                vrb_string(f+strings+no,nn,"qcom,shared_se") || vrb_string(f+strings+no,nn,"qcom,shared_ee")))return 19;
             /* Related IRQs inherit the verified GIC parent directly. A
              * child override or IRQ nexus could invalidate the fixed SPI
              * indexing even while the interrupts byte arrays still match. */
@@ -86,7 +91,8 @@ static inline int vrb_dt_check(const uint8_t *f,size_t available)
                 vrb_string(f+strings+no,nn,"goodix,iovdd-gpio")))return 12;
             at=(at+len+3)&~(size_t)3;
         } else if(token==9) {
-            if(depth || roots!=1 || gpio_phandles!=1 || avdd_phandles!=1 || iovdd_phandles!=1 || gic_phandles!=1)return 13;
+            if(depth || roots!=1 || gpio_phandles!=1 || avdd_phandles!=1 || iovdd_phandles!=1 || gic_phandles!=1 ||
+               gcc_phandles!=1 || rpmh_clock_phandles!=1 || xo_phandles!=1)return 13;
             for(size_t r=0;r<VRB_RULE_COUNT;r++)if(!seen[r])return 14;
             return 0;
         } else if(token!=4)return 15;

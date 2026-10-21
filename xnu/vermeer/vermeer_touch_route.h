@@ -6,6 +6,10 @@
 #ifndef VERMEER_TOUCH_ROUTE_H
 #define VERMEER_TOUCH_ROUTE_H
 #include <stdint.h>
+/* Kalama pinctrl: eGPIO_PRESENT11 + AP-select12. Preserve both bits and
+ * never drive a fitted eGPIO pad currently assigned to another controller. */
+static inline int vtr_pin_owned(uint32_t config)
+{return !(config&(1u<<11)) || !!(config&(1u<<12));}
 #include <stddef.h>
 enum { VTR_OK, VTR_LAYOUT, VTR_MATCH, VTR_CONTEXT, VTR_TRANSLATED, VTR_UNSAMPLED };
 enum { VTR_TRANSPORT_REFUSED,VTR_TRANSPORT_FIFO,VTR_TRANSPORT_GPI_REQUIRED };
