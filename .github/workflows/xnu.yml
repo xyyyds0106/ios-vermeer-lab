@@ -50,11 +50,12 @@ jobs:
       - name: Check storage bounds and address encoding
         run: |
           mkdir -p host-test
-          for test in gpt dma media_policy usb_debug sample_images migration_transaction frame_policy goodix_packet geni_spi touch_clock; do
+          for test in gpt dma media_policy usb_debug sample_images migration_transaction frame_policy goodix_packet geni_spi touch_clock baseband_protocol baseband_smem; do
             clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g "tests/${test}_test.c" -o "host-test/$test"
             "host-test/$test"
           done
           python3 tests/gui_profile_test.py
+          python3 tests/baseband_inventory_test.py
 
       - name: Fetch build script
         run: |
