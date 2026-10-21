@@ -50,7 +50,7 @@ jobs:
       - name: Check storage bounds and address encoding
         run: |
           mkdir -p host-test
-          for test in gpt dma media_policy; do
+          for test in gpt dma media_policy usb_debug; do
             clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g "tests/${test}_test.c" -o "host-test/$test"
             "host-test/$test"
           done

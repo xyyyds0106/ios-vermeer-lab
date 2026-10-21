@@ -1,0 +1,48 @@
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -106,6 +106,8 @@
+ 
+ bsd/dev/vermeer_ufs_ios.c			standard
+ bsd/dev/vermeer_ios_bootstrap.c		standard
++bsd/dev/vermeer_debug.c			standard
++bsd/dev/vermeer_usb_debug.c		standard
+ bsd/dev/memdev.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -1102,6 +1102,8 @@
+ 	extern int vermeer_ios_prepare_root(void);
+ 	int prepare_error = vermeer_ios_prepare_root();
+ 	if (prepare_error) panic("VERMEER ROOT: first-boot preparation failed: %d", prepare_error);
++	extern void vermeer_usb_debug_start(void);
++	vermeer_usb_debug_start();
+ #endif
+ 
+ 	load_init_program(p);
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -270,6 +270,10 @@
+ _cnputs(char *c, int size, bool poll)
+ {
+ 	extern int disableConsoleOutput;
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	extern void vermeer_debug_append(const char *, int);
++	vermeer_debug_append(c, size);
++#endif
+ 
+ 	if (disableConsoleOutput) {
+ 		return;
+--- a/pexpert/arm/pe_kprintf.c
++++ b/pexpert/arm/pe_kprintf.c
+@@ -156,6 +156,10 @@
+ static void
+ serial_putc_crlf(char c)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	extern void vermeer_debug_append(const char *, int);
++	vermeer_debug_append(&c, 1);
++#endif
+ 	if (c == '\n') {
+ 		uart_putc('\r');
+ 	}

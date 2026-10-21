@@ -2,6 +2,13 @@
 
 Private experiment for Redmi K70 (vermeer / SM8550).
 
+Latest K70 integrated003 evidence: official launchd passes FIPS/keybag boot
+tasks and repeatedly starts SpringBoard/backboardd and multiple Apple daemons.
+Those services still crash and restart; no iOS GUI is proven. Integrated004
+adds an opt-in [USB serial debug console](USB-DEBUG.md) for complete log capture
+and bounded read-only queries. Host checks and compilation do not establish
+hardware USB enumeration; that requires the next temporary boot.
+
 The initial workflow reproduces the **SWEET reference build** from
 https://github.com/dipa-studio/ios-sweet at
 11da58bd050672960c0a83b5bef2176047eea479. It is **not a K70 kernel** and must

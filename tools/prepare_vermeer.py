@@ -3,6 +3,7 @@
 Keep the upstream patch series untouched. Rewrite matching added/removed/context
 lines consistently so subsequent patches still apply. This profile intentionally
 does not include the later reference UFS, USB, touch, battery or iOS GUI drivers.
+The iOS profile adds the independent guarded K70 CDC ACM debug transport.
 The UFS-test profile adds only our guarded read self-test beside RAM-root.
 """
 from pathlib import Path
@@ -72,7 +73,9 @@ if ufs_probe:
     if ufs_block:
         names += ('vermeer_ufs_block.c', 'vermeer_gpt.h')
     if ios:
-        names += ('vermeer_ufs_ios.c', 'vermeer_media_policy.h', 'vermeer_ios_bootstrap.c')
+        names += ('vermeer_ufs_ios.c', 'vermeer_media_policy.h', 'vermeer_ios_bootstrap.c',
+                  'vermeer_log_ring.h', 'vermeer_debug.c',
+                  'vermeer_usb_protocol.h', 'vermeer_usb_debug.c')
     for name in names:
         data = (source.parent / 'vermeer' / name).read_text()
         path = 'bsd/dev/' + name
@@ -83,6 +86,8 @@ if ufs_probe:
 if ios:
     shutil.copyfile(source.parent / 'vermeer/0023-vermeer-ios-bootstrap.patch',
                     target / '0023-vermeer-ios-bootstrap.patch')
+    shutil.copyfile(source.parent / 'vermeer/0024-vermeer-usb-debug-hook.patch',
+                    target / '0024-vermeer-usb-debug-hook.patch')
 if ramroot:
     stages = sorted(p for p in source.glob('*.sh') if int(p.name[:4]) <= last_patch)
     assert len(stages) == (3 if hfs_ramroot else 2), 'Unexpected staging scripts'

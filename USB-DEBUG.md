@@ -1,0 +1,40 @@
+# K70 USB debug console
+
+Experimental opt-in CDC ACM serial interface, integrated with the iOS profile.
+Boot with `vermeer_usb=1`. The default and diagnostic profiles do not start USB.
+Windows uses its built-in Usbser driver for CDC ACM (class02/subclass02).
+The laboratory VID/PID is1209:0001; synthetic serial `K70DBG004`.
+
+The interface streams the most recent1MiB of console text, then live output.
+Open the COM port with DTR asserted. Speed115200/8N1 is informational on USB.
+`tools/capture-debug.ps1` finds this exact synthetic device and records bytes,
+rotating at32MiB per file. Captures and device information stay outside Git.
+
+Commands, each followed by a newline:
+
+- `help`: command list
+- `ping`: build-tag response
+- `status`: event/byte counters and dropped console bytes
+- `replay`: replay the retained RAM log
+
+No shell, memory access, storage operations or reboot commands are exposed.
+This is log transport and bounded queries, not an interactive kernel debugger.
+After a cable disconnect, configured bus reset, overflow or DMA/endpoint error,
+the interface stops and retains all DMA memory. Reboot the temporary kernel to
+reconnect. iOS continues independently; panic-time polling is not implemented.
+
+Hardware guards require the SM8550 USB power/clocks already enabled by ABL,
+DWC3/3.1 device mode, sufficient DMA address width, one identity SMMU route for
+SID0x40, and contiguous memory in the independently tested2GiB high-RAM range.
+The driver never changes clock, PHY/repeater, PMIC or SMMU configuration; only
+DWC device registers and the Qualcomm wrapper's VBUS-valid override are set.
+An unsupported hardware state skips USB and leaves the normal boot running.
+
+Hardware enumeration and live capture must be verified separately from host
+tests and compilation. A screen displaying this build's USB state may still be
+needed for the first attempt.
+
+Register/protocol references:
+[Linux DWC3](https://github.com/torvalds/linux/tree/v6.1/drivers/usb/dwc3),
+[SM8550 GCC](https://github.com/torvalds/linux/blob/master/drivers/clk/qcom/gcc-sm8550.c),
+[Windows CDC ACM](https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/usb-driver-installation-based-on-compatible-ids).
