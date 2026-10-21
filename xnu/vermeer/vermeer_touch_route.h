@@ -8,6 +8,16 @@
 #include <stdint.h>
 #include <stddef.h>
 enum { VTR_OK, VTR_LAYOUT, VTR_MATCH, VTR_CONTEXT, VTR_TRANSLATED, VTR_UNSAMPLED };
+enum { VTR_TRANSPORT_REFUSED,VTR_TRANSPORT_FIFO,VTR_TRANSPORT_GPI_REQUIRED };
+static inline unsigned vtr_transport(unsigned protocol,uint32_t interface,uint32_t dma_mode,
+    uint32_t gsi_events,uint32_t status)
+{
+    if(protocol!=1)return VTR_TRANSPORT_REFUSED;
+    /* Pinned downstream spi-msm-geni selects GSI only for FIFO-disabled SPI.
+     * MODE_EN=1 alone does not distinguish GPI from internal DMA or activity. */
+    if(interface&1u)return VTR_TRANSPORT_GPI_REQUIRED;
+    return !dma_mode && !gsi_events && !(status&0x1001u)?VTR_TRANSPORT_FIFO:VTR_TRANSPORT_REFUSED;
+}
 struct vtr_route {
     uint32_t id0,id1,id2,cr0,matches,slot,smr,s2cr,cbar,sctlr,reason;
 };
@@ -28,16 +38,17 @@ static inline int vtr_may_restore(uint32_t inherited_dma,unsigned quarantined,ui
     /* Even M_ACTIVE=0 does not authorize changing an unowned DMA engine. */
     return !(inherited_dma&1u) && !quarantined && !(status&0x1001u);
 }
-static inline int vtr_identity(void *ctx,uint32_t (*read)(void *,unsigned),struct vtr_route *out)
+static inline int vtr_identity_sid(void *ctx,uint32_t (*read)(void *,unsigned),unsigned sid,struct vtr_route *out)
 {
     if(!out || !read)return 0;
     *out=(struct vtr_route){0};out->reason=VTR_LAYOUT;
+    if(sid!=0xa3 && sid!=0xb6)return 0; /* fixed K70 wrapper/GPI query allowlist */
     out->id0=read(ctx,0x20);out->id1=read(ctx,0x24);out->id2=read(ctx,0x28);out->cr0=read(ctx,0);
     if(out->id0!=0x4c017e69u || out->id1!=0x60000046u || out->id2!=0x5111u ||
        out->cr0!=0x00280406u)return 0;
     for(unsigned i=0;i<105;i++) {
         uint32_t smr=read(ctx,0x800+4*i);
-        if((smr&0x80000000u) && !((smr^0xa3u)&~((smr>>16)&0x7fffu)&0xffffu)) {
+        if((smr&0x80000000u) && !((smr^sid)&~((smr>>16)&0x7fffu)&0xffffu)) {
             out->matches++;out->slot=i;out->smr=smr;out->s2cr=read(ctx,0xc00+4*i);
         }
     }
@@ -54,4 +65,6 @@ static inline int vtr_identity(void *ctx,uint32_t (*read)(void *,unsigned),struc
     if(((out->cbar>>16)&3u)!=1 || (out->sctlr&1u))return 0;
     out->reason=VTR_OK;return 1;
 }
+static inline int vtr_identity(void *ctx,uint32_t (*read)(void *,unsigned),struct vtr_route *out)
+{return vtr_identity_sid(ctx,read,0xa3,out);}
 #endif

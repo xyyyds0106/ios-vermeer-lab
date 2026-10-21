@@ -1,8 +1,12 @@
 # K70 physical touch candidate
 
 This is an experimental native XNU input path, not a Linux module loader.
-The current DMA candidate has not been booted. GUI011 remains the hardware
-baseline: clocks pass, FIFO is disabled and input reports remain zero.
+GUI012/source42ce3a7 has been booted: the user confirms Hello/setup, display
+submission continues, USB reopen/manual sampling passes, and touch remains0.
+It stops before any touch transaction with inherited DMA mode1, reset cfg1/io0,
+and no matching wrapper SIDa3. That does not establish GPI activity or rail state.
+**The next source corrects the transport design: FIFO-disabled K70 SPI requires
+GPI/GSI, not internal DMA. GPI is not implemented and is explicitly refused.**
 The existing Hello milestone did not include
 physical input: GUI009 records zero touch calls and HID dispatches after the
 reported swipe, with Setup/SpringBoard still in their main event loops.
@@ -30,9 +34,9 @@ Only the four observed SPI pins are configured; reset/interrupt GPIOs and PMIC
 rails are not changed. Existing GCC root/DFS/PLL settings are retained; a large
 internal serial divider is used for the initial transport.
 
-When FIFO is disabled it can select internal DMA, after checking the existing
-SID0xa3 identity route and retaining two exclusive16KB pages in tested RAM.
-It refuses an already enabled internal/GPI DMA mode. There are no SMMU changes,
+The FIFO path is entered only with FIFO enabled, DMA/GSI disabled and an idle
+SPI engine. FIFO-disabled hardware is observed and refused as GPI-required.
+There are no SMMU changes,
 PMIC/reset writes, firmware/configuration upload or storage access.
 Version PID9916 and checksums must match, followed by bounded IC-information
 tables with8-byte header/point records and valid native axes. Android's
@@ -60,7 +64,9 @@ GUI011 hardware evidence passes clock preflight but finds FIFO disabled. It
 stops before a GT9916 transaction, so the FIFO-only driver above cannot handle
 that observed state.
 
-`vermeer_geni_dma.h` adds a separately tested internal-DMA transfer core. It
+`vermeer_geni_dma.h` retains a separately tested experimental internal-DMA core,
+which is **not called by the corrected K70 driver**. Its host tests do not
+establish compatibility with this board's FIFO-disabled firmware. The core
 requires distinct, retained, whole CPU pages for TX/RX, a live board route/reset
 authorization callback and synchronous cache-maintenance callbacks. It preserves
 upper physical-address words, arms RX before TX, latches TX/RX/master completion
@@ -74,28 +80,42 @@ pages, high physical addresses, stale and staggered completion, missing TX/RX/
 master completion, active-engine timeout, bus errors and cache failures. The
 core also passes a standalone ARM64 compilation with the current XNU recipe.
 
-The core is now called by `vermeer_touch.c` and both new headers are packaged
-only into the GUI profile. `vermeer_touch_route.h` accepts only the observed
-apps-SMMU geometry, one SID0xa3 match, and either existing direct bypass or a
-bounded context with stage1 disabled/stage2 bypassed. It never creates a stream
-mapping, disables translation or changes a context bank. The platform rechecks
-that route, reset pad and the retained pages before each DMA transaction.
-Cache operations run on a pinned CPU and cover whole dedicated pages with PoC
-barriers. Faulted DMA retains clocks/pins/pages even if the command bit is idle.
+Pinned official `drivers/spi/spi-msm-geni.c` matches the saved `qcom,spi-geni`
+compatible. Its `select_xfer_mode` requires GSI when FIFO is disabled and its
+setup requests GPI TX/RX channels. This is stronger board-source evidence than
+the generic FIFO-only reference. It does not prove the loaded binary equals
+that exact source. The former internal-DMA selection/allocator is removed from
+the K70 driver; the experimental reusable core remains separately tested.
+
+The enabled SPI DT resolves both DMA descriptors to `qcom,gpi-dma@a00000`,
+range0xa00000+0x60000, SID0xb6. Wrapper1's SID0xa3 is a different master.
+The5-cell TX/RX descriptors are `(0,4,1,64,2)` / `(1,4,1,64,2)`. Pinned
+`drivers/dma/qcom/msm_gpi.c` interprets these as channel0/1, SE4, SPI protocol1,
+64 requested TREs, static GPII field1 selecting **instance0**, and priority0.
+The fifth cell is not an execution-environment number. The provider declares
+static-gpii-mask1, GPII mask0x1e, EE register offset0x10000, and a1MiB IOVA pool
+starting0x100000. Do not mix it with the separate0x800000/SID0x436 provider.
+
+`vermeer_touch_route.h` snapshots only the observed apps-SMMU geometry and
+fixed SIDa3/SIDb6 allowlist. Unknown layout or missing/ambiguous mapping is
+refused. It never creates a stream mapping or changes a context. A valid
+identity snapshot does not establish ownership of a GPI instance or its rings.
+The next source records both routes plus GSI_EVENT_EN, SE_IRQ_EN, GENI_STATUS
+and TX/RX DMA status, retaining resources for any inherited DMA/GSI state.
 
 USB `input` reads retained atomic snapshots of SMMU layout/route/refusal reason,
-reset24/IRQ25 configuration and IO, inherited DMA mode/lengths, DMA status and
-quarantine state. It performs no MMIO in the USB callback. Route reasons are
+reset24/IRQ25 configuration and IO, inherited mode/lengths, DMA status, GSI
+events and IRQ routing. It performs no MMIO in the USB callback. Route reasons are
 0 accepted,1 unknown layout,2 missing/ambiguous match,3 invalid context bank,
 4 active/unsupported translation,5 not sampled. A rejected route and reset state are both
 sampled before any SE/pin setup, so the next boot can distinguish their causes.
 
-This is a conditional communication candidate, not proof of working touch or
-completed board power bring-up. **Reset high does not verify AVDD/IOVDD voltage
+This remains an unsupported GPI path, not completed touch/power bring-up.
+**Reset high does not verify AVDD/IOVDD voltage
 or regulator ownership.** The candidate attempts to reuse the inherited rail
 state; it does not power up a controller left in reset or upload firmware.
-GUI011's reset IO sample0 means it is expected to stop and retain diagnostic
-evidence if that state recurs. Actual route, rail readiness, electrical SPI and
+GUI012 reset cfg1/io0 confirms a GPIO input sampled low, without proving why.
+Actual GPI route, rail readiness, electrical SPI and
 GT9916 identity remain hardware tests; HID publication still requires validated
 identity, IC information and complete packets.
 
@@ -104,13 +124,15 @@ unknown layouts, all70 valid/186 invalid context-bank indices, translation
 refusal,4096 GPIO configurations and high-RAM allocation boundaries. The
 generated0067 patch strictly applies to a pre-hook fixture derived from the
 actual GUI011 source; all seven packaged source/header files match byte-for-byte.
-Four affected units pass actual ARM64/16KB XNU syntax compilation. The independent
-`gpu-touch-checks.yml` runs the GPU/touch suite and GUI isolation automatically;
-full kernel linking and a new integrated-image hardware test remain pending.
+The independent `gpu-touch-checks.yml` runs the GPU/touch suite and GUI isolation.
+The new GPI snapshots and policy have local regression/ARM64 checks; another full
+build/device test for this correction remains pending. GUI012 is retained as
+hardware evidence of preflight refusal, not a successful internal-DMA test.
 
 Protocol/register references (no binary firmware included):
 
-- [MiCode GENI SPI](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/spi/spi-geni-qcom.c),
+- [MiCode downstream GENI SPI](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/spi/spi-msm-geni.c),
+  [GPI channel binding](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/dma/qcom/msm_gpi.c),
   [Kalama clocks](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/clk/qcom/gcc-kalama.c),
   [Kalama pinctrl](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/pinctrl/qcom/pinctrl-kalama.c).
 - [Exact-compatible Xiaomi9916 reference](https://github.com/Air-Alex/kernel_xiaomi_sm8550-modules/tree/d92dbc093c08af885d8a808a170a715c1c024312/qcom/opensource/touch-drivers/goodix_berlin_driver_9916).

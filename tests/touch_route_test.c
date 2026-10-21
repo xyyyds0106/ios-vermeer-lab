@@ -47,6 +47,22 @@ int main(void)
     make();regs[0]^=1;assert(!vtr_identity(regs,read_reg,&r) && reads==4);
     make();regs[0xc00/4]=0x20000;assert(!vtr_identity(regs,read_reg,&r));
     make();regs[0xc00/4]=0;assert(!vtr_identity(regs,read_reg,&r));
+    make();regs[0x804/4]=0x800000b6;regs[0xc04/4]=0x10000;
+    assert(vtr_identity_sid(regs,read_reg,0xb6,&r) && r.slot==1);
+    assert(vtr_identity(regs,read_reg,&r) && r.slot==0);
+    make();regs[0x800/4]=0x800000a3;
+    assert(!vtr_identity_sid(regs,read_reg,0xb6,&r) && !r.matches);
+    make();assert(!vtr_identity_sid(regs,read_reg,0x40,&r) && !reads);
+    for(unsigned proto=0;proto<4;proto++)for(unsigned ifc=0;ifc<4;ifc++)
+    for(unsigned mode=0;mode<4;mode++)for(unsigned events=0;events<16;events++) {
+        unsigned transport=vtr_transport(proto,ifc,mode,events,0);
+        if(proto!=1)assert(transport==VTR_TRANSPORT_REFUSED);
+        else if(ifc&1)assert(transport==VTR_TRANSPORT_GPI_REQUIRED);
+        else if(!mode && !events)assert(transport==VTR_TRANSPORT_FIFO);
+        else assert(transport==VTR_TRANSPORT_REFUSED);
+    }
+    assert(vtr_transport(1,0,0,0,1)==VTR_TRANSPORT_REFUSED);
+    assert(vtr_transport(1,0,0,0,0x1000)==VTR_TRANSPORT_REFUSED);
     for(unsigned cfg=0;cfg<1024;cfg++)for(unsigned io=0;io<4;io++) {
         int expected=!(cfg&0x3c) && (io&1) && (!(cfg&0x200) || (io&2));
         assert(vtr_reset_high(cfg,io)==expected);
