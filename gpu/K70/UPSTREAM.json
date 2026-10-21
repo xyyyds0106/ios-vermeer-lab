@@ -1,0 +1,177 @@
+{
+  "repository": "UniXNU/NativeAdreno",
+  "commit": "805c7e4bfb7451eb6923f4a14dea8c657b9be7d2",
+  "license": "../NativeAdreno/LICENSE",
+  "files": [
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoRing.h",
+      "upstream_git_blob": "55c6a937cf7c99c8f14e99f3ea92e1cf033a75f2",
+      "upstream_sha256": "0811915d30b72a15855714527c4c3f3657ba448597a528c30174765c19b32cda",
+      "changes": "Declares shared bounded fence-poll helper."
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoRing.cpp",
+      "upstream_git_blob": "1711ea19399c7c725c04e9014fcacdeef9fe41c5",
+      "upstream_sha256": "dc2c71b8225ec034b800e01d107939fa7d8a8b5335a2337323c016c9e5fc083e",
+      "changes": "Bounded fence polling, rechecks after callbacks, backwards-clock rejection and fence sequence exhaustion; no synthetic completion."
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoCpInit.h",
+      "upstream_git_blob": "7406ff998f9a65a1e2c5cac568db94cd4422b973",
+      "upstream_sha256": "8e192f1925da89e522b1f42d4d5659e8097d90f22e8deb54d5abd103ac80461b"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoCpInit.cpp",
+      "upstream_git_blob": "23759d2719edbc381987a654788b8781b0e10a92",
+      "upstream_sha256": "02bb5791a021ae115b430187291a7de30002c069d1924ef69a9c3282633bbe49"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoIrq.h",
+      "upstream_git_blob": "3640610cfc68e7e2b7e5af3f23788172e0d6e404",
+      "upstream_sha256": "c117f3462603574bf7a922b31105a5f0d59da1bcd1d8f108106c1304c07fc1f4"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoIrq.cpp",
+      "upstream_git_blob": "96af912d922d975916480cb37379b2b8d481a4c2",
+      "upstream_sha256": "65c005ce535296871db1b42af7b9e203221102d5a1f9d2c91951ba7cb4a1ee04"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoTimer.h",
+      "upstream_git_blob": "436610558d2b3a7968a88c3a55e151462bacde0c",
+      "upstream_sha256": "41fd744b29cb12a107d86b6e74a0abe33fa877326e2471e2d534241b016341eb",
+      "changes": "K70 named-window derivation documented."
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoTimer.cpp",
+      "upstream_git_blob": "022241556da532b43e85844161f25c5e162bbfec",
+      "upstream_sha256": "281221b6fc5c1175b71d7c54fda8275bab1b08d7b9819f7c60e4e4b10026f22a",
+      "changes": "K70 GMU origin0x68000, counter offsets0x16220/0x16224."
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoSmmuMemory.h",
+      "upstream_git_blob": "6fb40d3671b9a9768f92caaf31caa1282eb918f4",
+      "upstream_sha256": "d2988cc8fe670e569dd14d9556924784994782b6f9efdc1715d2ab281baf3b90"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoSmmuMemory.cpp",
+      "upstream_git_blob": "9aa7d0b6928d98cac67944d7f407cf9733b55c9a",
+      "upstream_sha256": "422a1c2b14408bc2a4855822b7110a4c8b09c31cb5b9820b85dbde648a31d657"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoSmmuContext.h",
+      "upstream_git_blob": "4ed1bcc96ff905ee042907e4dc576ff51d50c5db",
+      "upstream_sha256": "93ddf63bc1ddf449d3998a4fdc88946bf17e2d303cc6310b872b5d2bb04d68f5"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoSmmuContext.cpp",
+      "upstream_git_blob": "c9ae1613c987b8f51ba1ecaca6b29862a9ff9eeb",
+      "upstream_sha256": "caee8d5f6757f983d635fb01e9db820938c1e072f8af784fecd112dc647da4b8",
+      "changes": "K70 polling lifecycle disables continue_after_fault; actual FSR checks stop work on fault. CFIE/GFIE stay behind explicitly verified masked GIC sources."
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoVm.h",
+      "upstream_git_blob": "c82544d29bcaf65f97cd20cc51a9907fc714cfb0",
+      "upstream_sha256": "b275ea459d7622d67653a5501bd82717f84670b89870cde4ce95e9985a8ea0a8"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoVm.cpp",
+      "upstream_git_blob": "917cbd99d8512b63f2a728995cab13608091b8a6",
+      "upstream_sha256": "002d2e400b95995f98c0df0578daf8b42146c0a561067adde7b938241e34d815"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoPwrup.h",
+      "upstream_git_blob": "fa9586528ab3f172b4575b047d7a45a17f03e614",
+      "upstream_sha256": "708830fae4f6a5cea765992d44135126d7a034a239adece94f094d862819e889"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoPwrup.cpp",
+      "upstream_git_blob": "d604c142a178bc569fcba820b54756ef5bb19f5d",
+      "upstream_sha256": "625935493062e63f18d87a691436b4f53cce22969509501e77cbd58d27e398c4"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoSha256.h",
+      "upstream_git_blob": "fab08e81c445d24deb9615e6cc2421fa2b8645a2",
+      "upstream_sha256": "4c4f1a23f146c1370615ee52912b9bb0c2a3b919ccf14e07314460ffcdb34a74"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoSha256.cpp",
+      "upstream_git_blob": "ecef8ad3fc4ca94a3665792da897ead0c29cac08",
+      "upstream_sha256": "ee624a483a075b8ca44f1dff2efd66acee38c5ccd784192c23614cdb6605db1f"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoFirmware.h",
+      "upstream_git_blob": "6b989b66754f1980efae8167e6f9e5b5dc1b5598",
+      "upstream_sha256": "78d42a674a06aed96a5b206b927964772222eda33f93ae6d6509b6a5e9aba75b"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoFirmware.cpp",
+      "upstream_git_blob": "9d24dac1315f4cd2b4455541c81164feea543293",
+      "upstream_sha256": "87606cac2ded872d3f904decdaa47177192a019d3c365a49e138353a42279233"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoVmAlias.h",
+      "upstream_git_blob": "bdd6b9e55ee411f4249dcac077edc82015119870",
+      "upstream_sha256": "35fe908bd80389a18e395eb3bfdd5a40cb2c133fe6634dbead8d68cf2822eeea"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoPwrupRegs.h",
+      "upstream_git_blob": "570f464bbddd327aaa4f76220606f8ed80a5ab5c",
+      "upstream_sha256": "8067d9625e922173912eea09e6a504d9c1b31234d4656f8dd4148855882918e1"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoA740HwInit.h",
+      "upstream_git_blob": "e5cdfe412c3de920b912a316e49827be63721153",
+      "upstream_sha256": "008e9a923e78798ef54d3c4c37f44bbadd35911515d8832fe04793e51f31588c"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoGmuMemory.h",
+      "upstream_git_blob": "f7ffec2f80da3fc38d425706c31e66f198c0cbc2",
+      "upstream_sha256": "3c6c40f2bf742fb7970577a195f70802b1918ac9cf420bab42d9e69d1f8973b6"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoGmuMemory.cpp",
+      "upstream_git_blob": "b7fc90337009dcb552b405a9da0c1105f47b8cf0",
+      "upstream_sha256": "12a09b352eec6aa04f86b3f488e648228fecfd8d9eee5dc376fd2ee2e9fe3af8",
+      "changes": "NC GMU payloads switch exclusively owned native CPU pages before mapping; table pages remain WB; retain uncertain changes."
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoGmuContext.h",
+      "upstream_git_blob": "b6e4b12a3860d40e7ab00885907f75b85cba6795",
+      "upstream_sha256": "ba483ae025cdb82e7bd346c608a92ef854c76e15876658c7958bdcb93a9a203e",
+      "changes": "Expose actual owned context observation to the bounded native health path."
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoGmuContext.cpp",
+      "upstream_git_blob": "eb41fd99604e3e9b14369a55448f5d15fa960748",
+      "upstream_sha256": "a6bcf51a336aac8f583e902e0ee2129427b3db33a8512501fe365683d693d05c"
+    }
+  ],
+  "board_sources": [
+    {
+      "path": "gpu/K70/K70Gmu.h",
+      "repository": "UniXNU/UniXNU-sheng",
+      "commit": "7562a779ebdbdedc17c4c7274ba993acbbec8188",
+      "upstream_path": "package/ShengGmu.h",
+      "upstream_git_blob": "278c575695796b3dda4904b24e85796e543c15d5",
+      "upstream_sha256": "551fb5cc0a7b6d547ab1f9d9dfa6be2b602b291f5a6d6b278ca2d5a64e164b24",
+      "license": "BSD-2-Clause-Patent",
+      "changes": "K70 named windows and 0x68000 origin; explicit immutable board/firmware/setup qualification profile; no weak defaults or embedded firmware/sequencer bytes"
+    },
+    {
+      "path": "gpu/K70/K70Gmu.c",
+      "repository": "UniXNU/UniXNU-sheng",
+      "commit": "7562a779ebdbdedc17c4c7274ba993acbbec8188",
+      "upstream_path": "package/ShengGmu.c",
+      "upstream_git_blob": "5f4445e039e7071457e189684376a94b733f816d",
+      "upstream_sha256": "d61daa0b10038314922400daf6288a957e973043e171f986f5f226f2dff2de09",
+      "license": "BSD-2-Clause-Patent",
+      "changes": "K70 named windows and 0x68000 origin; explicit immutable board/firmware/setup qualification profile; no weak defaults or embedded firmware/sequencer bytes"
+    }
+  ],
+  "public_register_basis": {
+    "repository": "ianchb/sm8550-mainline",
+    "commit": "42f3b40c702abbc37c3a04c95af008cd283aeaf3",
+    "source_record": "device-audit/k70-gmu-public-source.json",
+    "note": "K70GmuRegs.h only public register facts; no firmware or sequencer payload."
+  }
+}
