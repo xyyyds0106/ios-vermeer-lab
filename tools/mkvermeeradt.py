@@ -101,7 +101,7 @@ def build(highram=False, ios=False, gui=False, product_adt=None):
         armio.children += [node('wdt', [('no-pmu', u32(1))]),
                           node('disp0', [('device_type', string('display-subsystem')),
                                          ('compatible', string('sweet,display')),
-                                         ('canvas-width', u32(1440)), ('canvas-height', u32(3200))])]
+                                         ('canvas-width', u32(1125)), ('canvas-height', u32(2436))])]
         result.children.append(node('buttons', [
             ('button-names', string('volup') + string('voldown') + string('hold')),
             ('home-button-type', u32(2)), ('opposed-power-vol-buttons', u32(1))]))

@@ -12,7 +12,9 @@ required = (
 if '--gui' in sys.argv:
     required += (b'IOMobileFramebufferUserClient', b'IOCoreSurfaceRoot',
                  b'SWEET HID: touch registered', b'SWEET HID: buttons registered',
-                 b'SWEET Sandbox: permissive policy', b'VERMEER FB: geometry guard')
+                 b'SWEET Sandbox: permissive policy', b'VERMEER FB: geometry guard',
+                 b'VERMEER FB: first present; muting panel text only',
+                 b'VERMEER FB: logical canvas 1125x2436 centered in 1440x3200')
 missing = [s.decode() for s in required if s not in data]
 if missing:
     raise SystemExit('Integrated kernel missing required services: ' + ', '.join(missing))

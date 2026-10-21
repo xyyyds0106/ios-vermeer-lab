@@ -1,9 +1,10 @@
 """Prepare bounded vermeer early/RAM-root/opt-in UFS-test kernel profiles.
 
 Keep the upstream patch series untouched. Rewrite matching added/removed/context
-lines consistently so subsequent patches still apply. This profile intentionally
-does not include the later reference UFS, USB, touch, battery or iOS GUI drivers.
-The iOS profile adds the independent guarded K70 CDC ACM debug transport.
+lines consistently so subsequent patches still apply. Hardware drivers for the
+reference device are excluded. The opt-in GUI profile adds generic display,
+surface and HID services with independently guarded K70 framebuffer bounds.
+The iOS profiles add the independent guarded K70 CDC ACM debug transport.
 The UFS-test profile adds only our guarded read self-test beside RAM-root.
 """
 from pathlib import Path
@@ -110,6 +111,12 @@ if ios:
 if gui:
     shutil.copyfile(source.parent / 'vermeer/0060-vermeer-gui-guards.patch',
                     target / '0060-vermeer-gui-guards.patch')
+    shutil.copyfile(source.parent / 'vermeer/0061-vermeer-gui-present.patch',
+                    target / '0061-vermeer-gui-present.patch')
+    # Generic graphics fixes only; no Sweet touch, PMIC, SMP or UFS drivers.
+    for number in (64, 68):
+        patch = next(source.glob(f'{number:04d}-*.patch'))
+        (target / patch.name).write_text(patch.read_text())
 if ramroot:
     stages = sorted(p for p in source.glob('*.sh') if int(p.name[:4]) <= last_patch)
     assert len(stages) == (3 if hfs_ramroot else 2), 'Unexpected staging scripts'

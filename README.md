@@ -2,9 +2,19 @@
 
 Private experiment for Redmi K70 (vermeer / SM8550).
 
-Latest K70 integrated003 evidence: official launchd passes FIPS/keybag boot
+Integrated GUI005 (`bc2a4bc`, Actions39542363383) temporarily boots on the K70.
+The framebuffer geometry guard passes, and backboardd opens the display,
+IOSurface and HID services and creates a 1440x3200 BGRA surface. SpringBoard
+and backboardd each start once without a captured crash, but logs then stop
+before a confirmed frame presentation. No iOS GUI is proven. The next delta
+avoids switching the read-only-late console selector on the first frame,
+preserves USB logging and panic text, uses a centered 1125x2436 UIKit canvas,
+and adds work-interval and cached-IOSurface lookup compatibility. Physical
+touch input is not implemented.
+
+Earlier integrated003 evidence: official launchd passes FIPS/keybag boot
 tasks and repeatedly starts SpringBoard/backboardd and multiple Apple daemons.
-Those services still crash and restart; no iOS GUI is proven. Integrated004
+Those services crashed and restarted. Integrated004
 adds an opt-in [USB serial debug console](USB-DEBUG.md) for log capture and
 bounded read-only queries. Its temporary boot (source `f0aec9c`,
 Actions39540409885) is hardware-confirmed: Windows COM6 receives the early

@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as folder:
     all_patches=''.join(p.read_text(errors='surrogateescape') for p in profile.glob('*.patch'))
     assert '+++ b/bsd/dev/sweet_ufs.c' not in all_patches
     assert 'SWEETLOG' not in all_patches
-    for name in ('0046-','0050-','0058-','0059-','0060-'):
+    for name in ('0046-','0050-','0058-','0059-','0060-','0061-','0064-','0068-'):
         assert any(p.name.startswith(name) for p in profile.iterdir())
     firmware=mkvermeeradt.node('device-tree',children=[mkvermeeradt.node('product',[
         ('product-name',b'iPhone\0')])])
@@ -27,7 +27,8 @@ with tempfile.TemporaryDirectory() as folder:
     assert chosen.prop('dram-size')==struct.pack('<Q',0x80000000)
     assert chosen.prop('display-scale')==struct.pack('<I',3)
     assert len(chosen.prop('unique-chip-id'))==8
-    assert child(armio,'disp0').prop('canvas-height')==struct.pack('<I',3200)
+    assert child(armio,'disp0').prop('canvas-width')==struct.pack('<I',1125)
+    assert child(armio,'disp0').prop('canvas-height')==struct.pack('<I',2436)
     assert child(armio,'wdt').prop('no-pmu')==struct.pack('<I',1)
     assert child(chosen,'asmb').prop('lp-sip0')==struct.pack('<Q',2)
     assert parsed.prop('model')==b'iPhone10,3\0'

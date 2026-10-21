@@ -1,0 +1,126 @@
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -266,6 +266,11 @@
+  *             waiting for an interrupt when the hardware device isn't ready
+  * @param size The number of characters to print to the console.
+  */
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++/* Mutable screen gate; never switch the read-only-late cons_ops_index. */
++int vermeer_console_muted;
++#endif
++
+ static inline void
+ _cnputs(char *c, int size, bool poll)
+ {
+@@ -273,6 +278,9 @@
+ #if defined(ARM64_BOARD_CONFIG_SWEET)
+ 	extern void vermeer_debug_append(const char *, int);
+ 	vermeer_debug_append(c, size);
++	if (vermeer_console_muted && !panic_active()) {
++		return;
++	}
+ #endif
+ 
+ 	if (disableConsoleOutput) {
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -31,6 +31,8 @@
+  */
+ #include "SweetSurface.h"
+ 
++extern "C" int vermeer_console_muted;
++
+ #if defined(SWEET)
+ #include <IOKit/IOService.h>
+ #include <IOKit/IOUserClient.h>
+@@ -61,7 +63,9 @@
+ #define SWEET_FB_NOTIFY_TYPES           8
+ #define SWEET_FB_NOTIFY_VSYNC           5
+ #define SWEET_FB_VSYNC_US               16667
+-#define SWEET_FB_DOT_PITCH              526     /* K70 panel density */
++#define SWEET_FB_DOT_PITCH              458     /* presented iPhone X canvas */
++#define VERMEER_LOGICAL_W 1125
++#define VERMEER_LOGICAL_H 2436
+ #define SWEET_FB_FORMAT_BGRA            0x42475241
+ 
+ class IOMobileFramebuffer : public IOService {
+@@ -84,6 +88,7 @@
+ public:
+ 	uint64_t      fPhys;
+ 	uint32_t      fWidth, fHeight, fRowBytes;
++	int32_t       fOffX, fOffY; /* logical origin relative to the panel */
+ 	uintptr_t     fPixels;          /* kernel mapping of the panel memory */
+ 	IOMemoryMap  *fMap;
+ 	SweetSurface *fSurface;         /* the panel memory as an IOSurface */
+@@ -150,6 +155,9 @@
+ 		IOLog("SWEET FB: no boot framebuffer\n");
+ 		return false;
+ 	}
++	/* Known UIKit layout, centered 1:1 inside the guarded K70 panel. */
++	fOffX = (VERMEER_LOGICAL_W - (int32_t)fWidth) / 2;
++	fOffY = (VERMEER_LOGICAL_H - (int32_t)fHeight) / 2;
+ 	fLock = IOLockAlloc();
+ 	fClients = OSArray::withCapacity(4);
+ 	fSurface = sweet_surface_create_physical(fPhys, fWidth, fHeight, fRowBytes, SWEET_FB_FORMAT_BGRA);
+@@ -177,6 +185,7 @@
+ 	registerService();
+ 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id);
++	IOLog("VERMEER FB: logical canvas 1125x2436 centered in 1440x3200\n");
+ 	return true;
+ }
+ 
+@@ -274,9 +283,10 @@
+ 		int quiet = 0;
+ 		fConsolePaused = true;
+ 		if (PE_parse_boot_argn("sweetfb_noconsole", &quiet, sizeof(quiet)) && quiet != 0) {
+-			PE_Video video;
+-			PE_current_console(&video);
+-			PE_initialize_console(&video, kPEDisableScreen);
++			IOLog("VERMEER FB: first present; muting panel text only\n");
++			vermeer_console_muted = 1;
++			/* Clear the border once; all writes stay inside the guarded reservation. */
++			bzero((void *)fPixels, (size_t)fRowBytes * fHeight);
+ 		}
+ 	}
+ 
+@@ -315,6 +325,11 @@
+ 		if (dx < 0 || dy < 0) {
+ 			dx = dy = 0;
+ 		}
++		/* Translate the smaller logical canvas into the centered panel area. */
++		dx -= fOffX;
++		dy -= fOffY;
++		if (dx < 0) { sx -= dx; w += dx; dx = 0; }
++		if (dy < 0) { sy -= dy; h += dy; dy = 0; }
+ 		if (w > (int32_t)s->width - sx) {
+ 			w = (int32_t)s->width - sx;
+ 		}
+@@ -450,8 +465,8 @@
+ 		outCount = 1;
+ 		break;
+ 	case kSweetFBGetDisplaySize:
+-		out[0] = fFB->fWidth;
+-		out[1] = fFB->fHeight;
++		out[0] = VERMEER_LOGICAL_W;
++		out[1] = VERMEER_LOGICAL_H;
+ 		outCount = 2;
+ 		break;
+ 	case kSweetFBIsMainDisplay:
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -447,8 +447,12 @@
+ 
+ 	IOLockLock(fLock);
+ 	bool was = fDown[finger];
+-	IOFixed nx = (IOFixed)(((int64_t)x << 16) / 1440);
+-	IOFixed ny = (IOFixed)(((int64_t)y << 16) / 3200);
++	/* Translate physical panel coordinates into the centered UIKit canvas. */
++	int32_t lx = x - (1440 - 1125) / 2, ly = y - (3200 - 2436) / 2;
++	lx = lx < 0 ? 0 : (lx > 1124 ? 1124 : lx);
++	ly = ly < 0 ? 0 : (ly > 2435 ? 2435 : ly);
++	IOFixed nx = (IOFixed)(((int64_t)lx << 16) / 1125);
++	IOFixed ny = (IOFixed)(((int64_t)ly << 16) / 2436);
+ 	bool moved = down && (nx != fX[finger] || ny != fY[finger]);
+ 	if (was == down && !moved) {
+ 		IOLockUnlock(fLock);
