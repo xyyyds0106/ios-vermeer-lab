@@ -17,6 +17,7 @@
 #include <pexpert/device_tree.h>
 #include "vermeer_geni_spi.h"
 #include "vermeer_goodix_info.h"
+#include "vermeer_touch_clock.h"
 extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
 extern void sweet_hid_touch(int,int,int,int);
 extern int sweet_hid_touch_ready(void);
@@ -27,9 +28,10 @@ void vermeer_touch_start(void);
 #define VT_GCC 0x00100000u
 #define VT_GPIO 0x0f100000u /* TLMM base f000000 + Kalama REG_BASE100000 */
 #define VT_VOTE 0x52008u
-#define VT_CLOCKS ((1u<<20)|(1u<<21)|(1u<<26))
-/* Wrapper1 master/slave AHB, SE4. SE3 is NOT the K70 touch controller. */
-static const unsigned vt_halt[3]={0x2327c,0x23280,0x184e4};
+#define VT_CLOCKS VTC_VOTES
+#define VT_RCG 0x184f0u
+/* Wrapper1 core2x/core/master/slave AHB, SE4. Never SE3. */
+static const unsigned vt_halt[5]={0x23294,0x23284,0x2327c,0x23280,0x184e4};
 static const unsigned vt_offsets[]={0x20,0x24,0x28,0x48,0x7c,0x224,0x22c,
     0x230,0x24c,0x250,0x254,0x258,0x25c,0x260,0x264,0x268,0x274,0x278,
     0x284,0x288,0x614,0x644,0x80c,0x810,0x814,0xe18,0xe1c,0xe30};
@@ -37,13 +39,16 @@ static const unsigned vt_offsets[]={0x20,0x24,0x28,0x48,0x7c,0x224,0x22c,
 static struct {
     vm_offset_t se,gcc,gpio;
     uint32_t vote_added,pins[4],saved[VT_NREGS];
-    bool pins_saved,engine_saved;
+    bool pins_saved,engine_saved,root_forced;
     struct vg_bus bus;
     struct vt_info info;
     struct vt_frame contacts;
     unsigned _Atomic stage;
     uint64_t _Atomic reports,bad,transactions,emitted;
     uint32_t _Atomic last_header;
+    uint32_t _Atomic clock_vote,clock_master,clock_slave,clock_se,clock_root,clock_cfg,clock_dfs;
+    uint32_t _Atomic clock_core2x,clock_core;
+    uint32_t _Atomic spi_phase,spi_irq,spi_status;
     uint8_t tx[1032],rx[1032];
 } touch;
 enum { VT_WAIT=1,VT_CLOCK,VT_FIRMWARE,VT_IDENTITY,VT_READY,VT_STOPPED };
@@ -74,6 +79,13 @@ static void vt_status(void)
         os_atomic_load(&touch.stage,relaxed),os_atomic_load(&touch.reports,relaxed),
         os_atomic_load(&touch.bad,relaxed),os_atomic_load(&touch.transactions,relaxed),
         os_atomic_load(&touch.emitted,relaxed),os_atomic_load(&touch.last_header,relaxed));
+    printf("VERMEER TOUCH: clock-snapshot vote=%08x core2x=%08x core=%08x master=%08x slave=%08x se4=%08x root=%08x cfg=%08x dfs=%08x\n",
+        os_atomic_load(&touch.clock_vote,relaxed),os_atomic_load(&touch.clock_core2x,relaxed),
+        os_atomic_load(&touch.clock_core,relaxed),os_atomic_load(&touch.clock_master,relaxed),
+        os_atomic_load(&touch.clock_slave,relaxed),os_atomic_load(&touch.clock_se,relaxed),
+        os_atomic_load(&touch.clock_root,relaxed),os_atomic_load(&touch.clock_cfg,relaxed),os_atomic_load(&touch.clock_dfs,relaxed));
+    printf("VERMEER TOUCH: spi-snapshot phase=%u irq=%08x status=%08x\n",
+        os_atomic_load(&touch.spi_phase,relaxed),os_atomic_load(&touch.spi_irq,relaxed),os_atomic_load(&touch.spi_status,relaxed));
 }
 static void vt_emit_hid(void *ctx,unsigned id,int down,unsigned x,unsigned y)
 {
@@ -86,7 +98,10 @@ static int vt_spi_read(uint32_t addr,uint8_t *out,unsigned n)
     bzero(touch.tx,n+8);touch.tx[0]=0xf1;
     for(unsigned i=0;i<4;i++)touch.tx[1+i]=(uint8_t)(addr>>(24-i*8));
     touch.tx[5]=touch.tx[6]=touch.tx[7]=0xff;
-    if(!vg_transfer(&touch.bus,touch.tx,touch.rx,n+8))return 0;
+    int ok=vg_transfer(&touch.bus,touch.tx,touch.rx,n+8);
+    os_atomic_store(&touch.spi_phase,touch.bus.phase,relaxed);os_atomic_store(&touch.spi_irq,touch.bus.last_irq,relaxed);
+    os_atomic_store(&touch.spi_status,touch.bus.last_status,relaxed);
+    if(!ok)return 0;
     bcopy(touch.rx+8,out,n);os_atomic_inc(&touch.transactions,relaxed);return 1;
 }
 static int vt_ack_event(void)
@@ -97,7 +112,10 @@ static int vt_ack_event(void)
     uint32_t addr=touch.info.event;touch.tx[0]=0xf0;
     for(unsigned i=0;i<4;i++)touch.tx[i+1]=(uint8_t)(addr>>(24-i*8));
     touch.tx[5]=0;
-    if(!vg_transfer(&touch.bus,touch.tx,touch.rx,6))return 0;
+    int ok=vg_transfer(&touch.bus,touch.tx,touch.rx,6);
+    os_atomic_store(&touch.spi_phase,touch.bus.phase,relaxed);os_atomic_store(&touch.spi_irq,touch.bus.last_irq,relaxed);
+    os_atomic_store(&touch.spi_status,touch.bus.last_status,relaxed);
+    if(!ok)return 0;
     os_atomic_inc(&touch.transactions,relaxed);return 1;
 }
 static int vt_clock_enable(void)
@@ -108,9 +126,23 @@ static int vt_clock_enable(void)
     touch.vote_added=VT_CLOCKS&~before;
     vt_wr(touch.gcc,VT_VOTE,before|VT_CLOCKS);
     for(unsigned i=0;i<1000;i++) {
-        if(!(vt_rd(touch.gcc,vt_halt[0])&0x80000000u) &&
-           !(vt_rd(touch.gcc,vt_halt[1])&0x80000000u) &&
-           !(vt_rd(touch.gcc,vt_halt[2])&0x80000000u))return 1;
+        uint32_t votes=vt_rd(touch.gcc,VT_VOTE),core2x=vt_rd(touch.gcc,vt_halt[0]),core=vt_rd(touch.gcc,vt_halt[1]);
+        uint32_t master=vt_rd(touch.gcc,vt_halt[2]),slave=vt_rd(touch.gcc,vt_halt[3]),se=vt_rd(touch.gcc,vt_halt[4]);
+        uint32_t cmd=vt_rd(touch.gcc,VT_RCG);
+        os_atomic_store(&touch.clock_vote,votes,relaxed);os_atomic_store(&touch.clock_master,master,relaxed);
+        os_atomic_store(&touch.clock_core2x,core2x,relaxed);os_atomic_store(&touch.clock_core,core,relaxed);
+        os_atomic_store(&touch.clock_slave,slave,relaxed);os_atomic_store(&touch.clock_se,se,relaxed);
+        os_atomic_store(&touch.clock_root,cmd,relaxed);os_atomic_store(&touch.clock_cfg,vt_rd(touch.gcc,VT_RCG+4),relaxed);
+        os_atomic_store(&touch.clock_dfs,vt_rd(touch.gcc,VT_RCG+0x14),relaxed);
+        if(vtc_ready(votes,core2x,core,master,slave,se)){vt_status();return 1;}
+        /* Match clk_rcg2_set_force_enable when SE4's root is parked. This
+         * requests the existing root only: no rate, parent, DFS or PLL edit.
+         * The bit is undone on failure after the engine is quiescent.
+         */
+        if(i==100 && (votes&VT_CLOCKS)==VT_CLOCKS && (se&0x80000000u) &&
+           (cmd&0x80000000u) && !(cmd&3u)) {
+            touch.root_forced=true;vt_wr(touch.gcc,VT_RCG,cmd|2u);
+        }
         delay(10);
     }
     printf("VERMEER TOUCH: SE4/AHB clock vote did not become ready\n");return 0;
@@ -119,14 +151,16 @@ static int vt_engine_setup(void)
 {
     touch.se=ml_io_map(VT_SE,0x4000);touch.gpio=ml_io_map(VT_GPIO,0x30000);
     if(!touch.se || !touch.gpio)return 0;
-    touch.bus=(struct vg_bus){NULL,vt_read,vt_write,vt_pause,0,0,0};
+    touch.bus=(struct vg_bus){.ctx=NULL,.read=vt_read,.write=vt_write,.pause=vt_pause};
     unsigned proto=(vt_rd(touch.se,0x68)>>8)&255u;
     uint32_t tx=vt_rd(touch.se,0xe24),rx=vt_rd(touch.se,0xe28);
     touch.bus.tx_depth=(tx>>16)&255u;touch.bus.rx_depth=(rx>>16)&255u;
-    printf("VERMEER TOUCH: SE4 firmware=%u TX=%08x RX=%08x reset=%08x\n",
-        proto,tx,rx,vt_rd(touch.gpio,24*0x1000+4));
+    uint32_t interface=vt_rd(touch.se,0x64);
+    printf("VERMEER TOUCH: SE4 firmware=%u TX=%08x RX=%08x reset=%08x interface=%08x\n",
+        proto,tx,rx,vt_rd(touch.gpio,24*0x1000+4),interface);
     if(proto!=1 || ((tx>>24)&63)!=32 || ((rx>>24)&63)!=32 ||
        touch.bus.tx_depth<4 || touch.bus.rx_depth<4 || !vg_idle(&touch.bus))return 0;
+    if(interface&1u){printf("VERMEER TOUCH: FIFO interface disabled; DMA transport required\n");return 0;}
     /* ABL must already have the controller out of reset. Do not power-cycle
      * unknown rails or substitute an unverified reset/firmware sequence.
      */
@@ -154,6 +188,8 @@ static int vt_engine_setup(void)
     vt_wr(touch.se,0x284,vg_pack(0));vt_wr(touch.se,0x288,vg_pack(2));
     vt_wr(touch.se,0x274,0);vt_wr(touch.se,0x278,0);
     vt_wr(touch.se,0x80c,0);vt_wr(touch.se,0x810,0);vt_wr(touch.se,0x814,touch.bus.rx_depth-2);
+    /* Raw status latches enabled, controller delivery disabled for polling. */
+    vt_wr(touch.se,0x614,0x7eu|VG_ERRORS|1u|(1u<<26)|(1u<<27)|(1u<<30));
     /* Retain the existing GCC root/DFS/PLL configuration and use a large
      * internal divider (128). No clock-rate or regulator programming.
      */
@@ -166,7 +202,7 @@ static void vt_restore(void)
     /* If abort did not quiesce, leave clocks/registers retained until reboot.
      * Disabling an active engine could turn a recoverable error into a fault.
      */
-    if(touch.engine_saved && !vg_idle(&touch.bus)) {
+    if(touch.se && (vt_rd(touch.se,VG_STATUS)&0x1001u)) {
         printf("VERMEER TOUCH: active engine retained after timeout; no further transfers\n");return;
     }
     if(touch.engine_saved) {
@@ -175,6 +211,7 @@ static void vt_restore(void)
         for(unsigned i=0;i<VT_NREGS;i++)vt_wr(touch.se,vt_offsets[i],touch.saved[i]);
     }
     if(touch.pins_saved)for(unsigned i=0;i<4;i++)vt_wr(touch.gpio,(44+i)*0x1000,touch.pins[i]);
+    if(touch.gcc && touch.root_forced)vt_wr(touch.gcc,VT_RCG,vt_rd(touch.gcc,VT_RCG)&~2u);
     if(touch.gcc && touch.vote_added)
         vt_wr(touch.gcc,VT_VOTE,vt_rd(touch.gcc,VT_VOTE)&~touch.vote_added);
 }
@@ -237,7 +274,7 @@ stopped:
 }
 void vermeer_touch_start(void)
 {
-    int enabled=0;DTEntry entry;void *value=NULL;unsigned size=0;
+    int enabled=0;DTEntry entry;const void *value=NULL;unsigned size=0;
     if(!PE_parse_boot_argn("vermeer_touch",&enabled,sizeof(enabled)) || enabled!=1)return;
     if(SecureDTLookupEntry(NULL,"/",&entry)!=kSuccess ||
        SecureDTGetProperty(entry,"physical-model",&value,&size)!=kSuccess ||

@@ -10,11 +10,18 @@ The GUI profile alone includes `vermeer_touch.c`. `vermeer_touch=1` and the exac
 selects `xiaomi,vermeer-spi` on GENI SE4 at0xa90000, CS0, with GPIO44..47 for
 qup1_se4_l0..3. GPIO24 is reset and GPIO25 interrupt. Clock101 is
 GCC_QUPV3_WRAP1_S4_CLK: vote bit26 at GCC0x52008, branch0x184e4. Wrapper1 AHB
-uses vote bits20/21, branches0x2327c/0x23280. TLMM register addressing includes
+uses vote bits20/21, branches0x2327c/0x23280. Wrapper core2x/core additionally
+use bits18/19, branches0x23294/0x23284, matching the UniXNU SM8550 board path.
+TLMM register addressing includes
 the Kalama0x100000 offset. The disabled I2C alternative is not used.
 
 The worker waits for a permanently retained HID service, votes only those
-three clocks, and checks all branch-off bits before accessing the sequencer.
+five clocks, and checks core/SE4 readiness before accessing the sequencer. Following
+MiCode's clock driver, an AHB clock in hardware-gated mode may report off while
+idle; its vote permits bus accesses to wake it. A parked SE4 root can be force
+requested without changing its rate, parent, DFS table or PLL. The additional
+root-enable bit is restored on failure. Clock snapshots are retained for USB
+queries without performing MMIO in the query callback.
 It requires SPI firmware,32-bit FIFOs, an idle engine and reset already high.
 Only the four observed SPI pins are configured; reset/interrupt GPIOs and PMIC
 rails are not changed. Existing GCC root/DFS/PLL settings are retained; a large
@@ -47,3 +54,5 @@ Protocol/register references (no binary firmware included):
   [Kalama clocks](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/clk/qcom/gcc-kalama.c),
   [Kalama pinctrl](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/pinctrl/qcom/pinctrl-kalama.c).
 - [Exact-compatible Xiaomi9916 reference](https://github.com/Air-Alex/kernel_xiaomi_sm8550-modules/tree/d92dbc093c08af885d8a808a170a715c1c024312/qcom/opensource/touch-drivers/goodix_berlin_driver_9916).
+- [UniXNU SM8550 touch board](https://github.com/UniXNU/UniXNU-sheng/blob/7562a779ebdbdedc17c4c7274ba993acbbec8188/package/TouchBoard.h)
+  and [GENI SPI](https://github.com/UniXNU/NativeGeniSpi/tree/b5399b5646c4d7415deec6d887fd51715a97a024).

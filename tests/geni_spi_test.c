@@ -42,7 +42,7 @@ static void write_reg(void *ctx,unsigned r,uint32_t v)
 }
 static void pause_bus(void *ctx){((struct mock *)ctx)->pauses++;}
 static struct vg_bus bus(struct mock *m)
-{ return (struct vg_bus){m,read_reg,write_reg,pause_bus,32,32,0}; }
+{ return (struct vg_bus){.ctx=m,.read=read_reg,.write=write_reg,.pause=pause_bus,.tx_depth=32,.rx_depth=32}; }
 int main(void)
 {
     assert(vg_pack(0)==0x7f8fe && vg_pack(2)==0xffefe);

@@ -25,12 +25,17 @@ and zero touch entries/HID dispatches. Setup and SpringBoard main threads remain
 in their event loops. This does not demonstrate a system deadlock or working
 physical input; the original symptom remains unresolved.
 
-The next integrated candidate adds an opt-in [K70 physical touch driver](TOUCH.md)
+GUI010 (`86e47c1`, Actions39563179085) adds an opt-in [K70 physical touch driver](TOUCH.md)
 for SPI SE4/GT9916. Controller identity, IC information, native axes and every
 complete report are checked before HID publication. It reuses ABL controller
 firmware and rails, uses polled FIFO transfers with bounded timeouts, and stops
 on unsupported hardware state. Local host checks and affected-source compiles
-pass; the new hardware path is not yet tested. Native Adreno/Metal acceleration
+pass, along with the complete build. The handset stops the driver before any
+SPI/controller access because its clock check does not become ready. USB and
+normal boot continue. The repair recognizes hardware-gated AHB idle state per
+MiCode's clock driver, can request a parked SE4 root without changing rates,
+and retains clock/SPI snapshots for read-only queries. That repair is not yet
+hardware-validated. Native Adreno/Metal acceleration
 remains unimplemented; these changes do not advertise a GPU service.
 
 GUI007 (`a6a6ddb`, Actions39549812373) boots with continued display swaps and
