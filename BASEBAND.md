@@ -109,9 +109,11 @@ or the global partition. Existing metadata may be stale. Candidate013 returns
 0=metadata valid,1=invalid,2=no pair,3=read refused,4=changed,5=reader failure;
 a hardware abort instead uses the stop screen. The older offline full-snapshot
 decoder retains its separate return codes and is not used for hardware reads.
-Candidate013 is not yet device-tested. The user supplied another temporary-boot
-confirmation, not yet consumed; device operations are coordinated with the
-GPU/touch lane so they must not race each other.
+After the user supplied another temporary-boot confirmation and the coordinator
+released a device slot, one temporary013 boot returned success (0.191s total).
+The confirmation is consumed. Screen evidence is pending; Fastboot acceptance
+does not prove execution or metadata readability. Device operations remain
+coordinated with the GPU/touch lane and must not race each other.
 
 ## Validation and continuation
 
