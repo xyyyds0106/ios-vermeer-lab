@@ -8,3 +8,4 @@ ${CC:-clang-14} -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
 UBSAN_OPTIONS=halt_on_error=1 "$out/power"
 ${CC:-clang-14} -target aarch64-none-elf -ffreestanding -std=c11 -Wall -Wextra -Werror \
     -fsyntax-only -include xnu/vermeer/vermeer_rpmh_touch_native.h -x c /dev/null
+python3 tests/run-rpmh-native-board-tests.py

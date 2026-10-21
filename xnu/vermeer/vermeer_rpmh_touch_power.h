@@ -12,6 +12,15 @@
 #define VRW_IRQ_OWNER 512u
 #define VRW_SEQUENCE_QUALIFIED 1024u
 #define VRW_REQUIRED 2047u
+/* Explicit experimental native-driver policy. Ordinary MMIO may terminate
+ * XNU on external abort/SError or hang on an unresponsive bus. This bit never
+ * asserts VRP_FAULT_CONTAINED; no recovery/retry/rollback is promised. */
+#define VRW_FATAL_MMIO 2048u
+static inline int vrw_proof_valid(unsigned p)
+{
+    return (p&(VRW_REQUIRED&~VRP_FAULT_CONTAINED))==(VRW_REQUIRED&~VRP_FAULT_CONTAINED) &&
+        !!(p&(VRP_FAULT_CONTAINED|VRW_FATAL_MMIO));
+}
 #define VRW_ACK UINT32_C(0x10108)
 #define VRW_AMC UINT32_C(0x10000)
 #define VRW_TRIGGER UINT32_C(0x1000000)
@@ -29,7 +38,8 @@ struct vrw_io {
     void (*wait_us)(void *,unsigned); /* bounded thread-context delay, no I/O */
     unsigned iovdd_settle_us; /* platform-qualified sequence delay, <=50000 */
     /* I/O is relative to retained DRV2 mapping. Read/write callbacks must be
-     * ordered, fault-contained and bounded; clocks cannot preempt a hung bus. */
+     * ordered and bounded at the software level. FAULT_CONTAINED and fatal
+     * native MMIO are distinct policies; clocks cannot preempt a hung bus. */
 };
 struct vrw_state {
     unsigned used,phase,status,poisoned,touched,rail,completed_rails,selected;
@@ -42,7 +52,7 @@ static inline int vrw_fail(struct vrw_state *s,unsigned status)
 { s->status=status;s->phase=VRW_STOPPED;return 0; }
 static inline int vrw_ready(struct vrw_state *s,const struct vrw_io *io)
 {
-    if((io->proof(io->ctx)&VRW_REQUIRED)!=VRW_REQUIRED || io->epoch(io->ctx)!=s->epoch)
+    if(!vrw_proof_valid(io->proof(io->ctx)) || io->epoch(io->ctx)!=s->epoch)
         return vrw_fail(s,VRW_REVOKED);
     uint64_t now=io->now_us(io->ctx);
     if(now<s->last)return vrw_fail(s,VRW_CLOCK);

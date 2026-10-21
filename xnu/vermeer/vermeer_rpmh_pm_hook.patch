@@ -1,0 +1,54 @@
+--- a/osfmk/arm64/cpu.c
++++ b/osfmk/arm64/cpu.c
+@@ -310,6 +310,12 @@
+ void
+ cpu_sleep(void)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	extern int vermeer_rpmh_pm_inhibited(void);
++	if (vermeer_rpmh_pm_inhibited()) {
++		panic("VERMEER RPMH: demand sleep with retained ACTIVE-only votes");
++	}
++#endif
+ 	cpu_data_t     *cpu_data_ptr = getCpuDatap();
+ 
+ 	cpu_data_ptr->cpu_active_thread = current_thread();
+@@ -484,6 +490,12 @@
+ void __attribute__((noreturn))
+ cpu_idle(void)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	extern int vermeer_rpmh_pm_inhibited(void);
++	if (vermeer_rpmh_pm_inhibited()) {
++		Idle_load_context();
++	}
++#endif
+ 	cpu_data_t     *cpu_data_ptr = getCpuDatap();
+ 	uint64_t        new_idle_timeout_ticks = 0x0ULL, lastPop;
+ 	bool idle_disallowed = false;
+@@ -996,6 +1008,12 @@
+ void
+ ml_arm_sleep(void)
+ {
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++	extern int vermeer_rpmh_pm_inhibited(void);
++	if (vermeer_rpmh_pm_inhibited()) {
++		panic("VERMEER RPMH: demand sleep with retained ACTIVE-only votes");
++	}
++#endif
+ 	cpu_data_t              *cpu_data_ptr = getCpuDatap();
+ 
+ 	if (cpu_data_ptr == &BootCpuData) {
+@@ -1266,3 +1284,12 @@
+ 	}
+ }
+ #endif
++
++#if defined(ARM64_BOARD_CONFIG_SWEET)
++unsigned vermeer_rpmh_pm_hook_version(void);
++unsigned
++vermeer_rpmh_pm_hook_version(void)
++{
++	return 1;
++}
++#endif

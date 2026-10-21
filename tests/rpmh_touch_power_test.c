@@ -10,12 +10,15 @@ struct fake {
     unsigned qualify_rev,qualify_db,begins,begin_fail;
     unsigned delayed,pending_tcs,stuck_write,change_id;
     unsigned revoke_settle,late_settle,settle;
+    unsigned faildb,change_target,prepare_failed,prepare_calls;
+    unsigned revoke_copy,timeout_copy,no_copy;
     uint64_t first_trigger;
     uint64_t ready_at;
     uint32_t addr[2],write_off[128],write_val[128];
     struct vrw_native_state *state;
 };
 static struct fake f;
+static uint8_t staged_db[0x20000];
 static void p16(uint8_t *p,unsigned v){p[0]=(uint8_t)v;p[1]=(uint8_t)(v>>8);}
 static void p32(uint8_t *p,uint32_t v){p16(p,v&65535);p16(p+2,v>>16);}
 static unsigned first(void){return f.rev==0x300?0x20:0x10;}
@@ -47,12 +50,12 @@ static void effect(void)
 }
 static int rd(void *p,uint32_t off,uint32_t *value)
 {
-    (void)p;assert(f.proof==VRW_REQUIRED);assert(!(off&3) && off<0x10000);
+    (void)p;assert(vrw_proof_valid(f.proof));assert(!(off&3) && off<0x10000);
     ++f.reads;*value=f.r[off/4];effect();return f.failread!=f.reads;
 }
 static int wr(void *p,uint32_t off,uint32_t value)
 {
-    (void)p;assert(f.proof==VRW_REQUIRED);assert(!(off&3) && off<0x10000);
+    (void)p;assert(vrw_proof_valid(f.proof));assert(!(off&3) && off<0x10000);
     assert(f.writes<128);f.write_off[f.writes]=off;f.write_val[f.writes]=value;++f.writes;
     /* No sleep/wake/fast-path, DRV0/1 or PMIC writes. */
     assert(off==0xd00 || off==0xd08 || (off>=0xd00 && off<0xd00+3*0x2a0));
@@ -79,16 +82,33 @@ static int wr(void *p,uint32_t off,uint32_t value)
     effect();return f.failwrite!=f.writes;
 }
 static int dbread(void *p,uint32_t off,uint32_t n,uint8_t *dst)
-{ (void)p;assert(off<=sizeof(f.db) && n<=sizeof(f.db)-off);++f.dbreads;memcpy(dst,f.db+off,n);effect();return 1; }
+{
+    (void)p;assert(off<=sizeof(f.db) && n<=sizeof(f.db)-off);++f.dbreads;
+    memcpy(dst,f.db+off,n);if(f.change_target && off==144)f.db[160]^=4;
+    effect();return f.faildb!=f.dbreads;
+}
 static int record(void *p,const struct vrp_event *e)
-{ (void)p;if(f.change_id && e->job==VRP_DB && e->kind==VRP_END)f.r[0]=0x40000;return 1; }
+{
+    (void)p;
+    if(f.state)assert(vrw_native_touch_init(f.state,NULL)==VRW_REUSED);
+    if(f.change_id && e->job==VRP_DB && e->kind==VRP_END)f.r[0]=0x40000;
+    if(e->phase==VRP_DB_HEADER && e->kind==VRP_BEFORE) {
+        if(f.revoke_copy)f.proof=0;
+        if(f.timeout_copy)f.now+=20000000;
+    }
+    return 1;
+}
 static void finish(void *p,unsigned mode){(void)p;++f.finish_count;f.finish_mode=mode;}
+static int prepare(void *p){(void)p;++f.prepare_calls;return !f.prepare_failed;}
 static int begin(void *p,struct vrw_native_lease *l)
 {
     (void)p;++f.begins;if(f.begin_fail)return 0;
-    *l=(struct vrw_native_lease){{&f,bits,epoch,time_us,rd,wr,wait_us,f.settle},
-        VRP_RSC_BASE,VRP_RSC_BYTES,VRP_DB_BASE,VRP_DB_BYTES,f.generation,
-        dbread,record,finish};
+    *l=(struct vrw_native_lease){
+        .io={&f,bits,epoch,time_us,rd,wr,wait_us,f.settle},
+        .rsc_start=VRP_RSC_BASE,.rsc_bytes=VRP_RSC_BYTES,.db_start=VRP_DB_BASE,.db_bytes=VRP_DB_BYTES,
+        .generation=f.generation,.read_db=dbread,.record=record,.finish=finish,
+        .metadata_copy=staged_db,.metadata_bytes=sizeof(staged_db),.prepare_touch=prepare};
+    if(f.no_copy)l->metadata_copy=NULL;
     return 1;
 }
 static void reset(unsigned rev)
@@ -186,9 +206,56 @@ static void failures(void)
     }
     printf("Fault positions: %u reads, %u writes, %u callback boundaries; all PASS\n",reads,writes,ops);
 }
+static void fatal_native(void)
+{
+    struct vrw_native_state s;
+    const unsigned fatal=(VRW_REQUIRED&~VRP_FAULT_CONTAINED)|VRW_FATAL_MMIO;
+    for(unsigned rev=0;rev<2;rev++) {
+        reset(rev?0x300:0x207);f.proof=fatal;
+        assert(run(&s)==VRW_OK && f.triggered==2 && f.prepare_calls==1);
+        assert(!(f.proof&VRP_FAULT_CONTAINED) && f.finish_mode==VRW_KEEP_TOUCH_IDLE_HOLD);
+    }
+    reset(0x300);f.proof=fatal;assert(run(&s)==VRW_OK);
+    unsigned reads=f.reads,dbreads=f.dbreads,ops=f.ops;
+    for(unsigned at=1;at<=reads;at++) {
+        reset(0x300);f.proof=fatal;f.failread=at;
+        assert(run(&s)==VRW_IO && f.reads==at && f.finish_mode==VRW_QUARANTINE);
+    }
+    for(unsigned at=1;at<=dbreads;at++) {
+        reset(0x300);f.proof=fatal;f.faildb=at;
+        assert(run(&s)==VRW_IO && f.dbreads==at && !f.writes && f.finish_mode==VRW_QUARANTINE);
+    }
+    for(unsigned at=1;at<=ops;at++) {
+        reset(0x300);f.proof=fatal;f.revoke=at;
+        assert(run(&s)!=VRW_OK && f.ops==at);
+        reset(0x300);f.proof=fatal;f.epochchange=at;
+        assert(run(&s)!=VRW_OK && f.ops==at);
+    }
+    reset(0x300);f.proof=fatal;f.prepare_failed=1;
+    assert(run(&s)==VRW_IO && f.prepare_calls==1 && !f.writes && f.finish_mode==VRW_QUARANTINE);
+    reset(0x300);f.proof=fatal;f.change_target=1;
+    assert(run(&s)==VRW_LAYOUT && !f.writes && !f.prepare_calls);
+    reset(0x300);f.proof=fatal;p32(f.db,2);
+    assert(run(&s)==VRW_LAYOUT && !f.writes && f.dbreads==1);
+    reset(0x300);f.proof=fatal;p16(f.db+10,0xfff0);p16(f.db+14,1024);
+    assert(run(&s)==VRW_LAYOUT && !f.writes && !f.prepare_calls);
+    reset(0x300);f.proof=fatal;f.change_id=1;
+    assert(run(&s)==VRW_LAYOUT && !f.writes);
+    reset(0x300);f.proof=fatal;f.no_copy=1;
+    assert(run(&s)==VRW_GATED && !f.reads && !f.dbreads && !f.writes);
+    reset(0x300);f.proof=fatal;f.revoke_copy=1;
+    assert(run(&s)==VRW_REVOKED && f.dbreads==7 && !f.writes && !f.prepare_calls);
+    reset(0x300);f.proof=fatal;f.timeout_copy=1;
+    assert(run(&s)==VRW_TIMEOUT && f.dbreads==7 && !f.writes && !f.prepare_calls);
+    reset(0x300);f.proof=fatal;p16(f.db+12,1024*24);p16(f.db+14,1024);
+    assert(run(&s)==VRW_OK && f.dbreads==1029 && s.db.complete);
+    reset(0x300);f.proof=fatal;memcpy(f.db+168,"ldob2\0\0\0",8);
+    assert(run(&s)==VRW_LAYOUT && !f.writes && !f.prepare_calls);
+    printf("Fatal native policy/COPY parser: %u live DB reads, every read/epoch/revocation boundary PASS\n",dbreads);
+}
 int main(void)
 {
-    healthy();guards();failures();
+    healthy();guards();failures();fatal_native();
     puts("RPMh actual touch executor/native adapter: two layouts, actual command/trigger/ACK/cleanup, gates, ownership, timeout quarantine PASS");
     return 0;
 }
