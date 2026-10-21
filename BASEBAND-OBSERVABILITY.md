@@ -2,10 +2,12 @@
 
 ## Status and device ownership
 
-The user now requests automatic log collection and software return to Fastboot,
-without depending on photographs or button presses. GPU/touch owns all phone
-I/O (serial, ADB, Fastboot and reboot). This baseband change is offline only.
-Do not start a second device client or another framebuffer-only probe.
+Latest user steering permits manual device operation again and cancels automatic
+return-to-Fastboot as a prerequisite. GPU/touch owns all phone I/O (serial, ADB,
+Fastboot and reboot) and is testing the reviewed GUI012 image first. That image
+has no baseband observer commands. Do not send new commands to it or start a
+separate probe. The already-written offline handshake candidate below is tested
+and retained for later integration; no further unattended-loop work is required.
 
 Diagnostic013 remains **execution result unknown**. Its temporary boot command
 returned success; the photograph subsequently supplied was byte-identical to
@@ -52,15 +54,17 @@ The next integrated diagnostic needs this sequence, before hardware access:
    If the terminal record is not received, the host's persisted BEFORE_READ
    identifies the last attempted range and reports incomplete/unknown. It does
    not invent an ESR or call the event an observed hardware abort.
-5. The device owner saves the terminal result or incomplete trace and only then
-   requests a separately verified software bootloader reset. Observe this same
-   handset enumerating in Fastboot and verify product before reporting it ready.
+5. The device owner saves the terminal result or incomplete trace and arranges
+   recovery/return, including manual operation under the latest authorization.
+   A software bootloader reset is optional and needs its own validation. Observe
+   this same handset enumerating in Fastboot before reporting it ready.
    Missing enumeration is failure/unknown, not a cue to retry register writes.
 
 The metadata reader retains the013 directory/ownership/range checks. MMIO
 mapping and fault behavior under XNU require separate integration work; passing
 the offline parser does not authorize arbitrary physical reads. Exception and
-reset paths are prerequisites for unattended testing, not implemented here.
+reset paths were prerequisites for unattended testing, not implemented here;
+an automatic reset is no longer required for the next manually assisted test.
 
 ## Implemented offline record contract
 
@@ -148,29 +152,62 @@ Each published BEGIN, BEFORE_READ, READ_OK and terminal record waits for
 frame. Early, duplicate, stale or malformed ACKs cannot advance it. Successful
 BEFORE_READ acknowledgement increments only the synthetic-step counter; there
 is no hardware operation to invoke. FINISHED is DONE only after its ACK.
-The initial run/image handshake and worker registration remain integration work.
+Worker registration remains integration work. The bounded start-handshake and
+queue below are now implemented as a separate, offline-tested component.
 
-The proposed bounded start-handshake commands are below; they are **not yet
-recognized by the current USB parser**. USB copies commands to the sole worker,
-which owns a staging object separate from the active observer:
+`vermeer_baseband_commands.h` implements these commands; they are **not yet
+recognized by the current USB parser**. The fragment order is now explicitly
+`HASH16 TOKEN32`, matching the coordinator's latest interface request and the
+host builder; the previous documentation-only `TOKEN32 HASH16` form is rejected.
+USB parses/copies complete commands into an8-entry bounded value queue. The sole
+worker owns staging and returns START/ACK/STOP requests without invoking observer,
+MMIO, file or reset functions inside this header:
 
 | Proposed command | Length without newline | Staging action |
 | --- | --- | --- |
 | `bb TOKEN32` | 35 | Start a new nonzero128-bit token, clear32 hash bytes/4-bit mask, set fixed2s deadline |
-| `bh0 TOKEN32 HASH16` through `bh3 TOKEN32 HASH16` | 53 | Supply exactly8 bytes of the SHA256 at offsets0/8/16/24; token must match |
+| `bh0 HASH16 TOKEN32` through `bh3 HASH16 TOKEN32` | 53 | Supply exactly8 bytes of the SHA256 at offsets0/8/16/24, strictly in0..3 order; token must match |
 | `bg TOKEN32` | 35 | Commit only if token matches, all4 chunks exist, digest is nonzero and deadline has not expired; call `vbb_observer_start` once |
 | `ba TOKEN32 SEQ16 CRC8` | 61 | Existing candidate ACK parser, worker only; no staging changes |
 
-Require lowercase hex of exact width, exact spaces and no trailing text. Every
+The parser requires lowercase hex of exact width, exact spaces and no trailing text. Every
 hash fragment carries the entire run token, avoiding short-ticket ambiguity.
-Reject duplicate/conflicting chunks; malformed staging commands, expiry or
-disconnect erase the staging object without publishing BEGIN or starting work.
-No fragment extends the original deadline. Reject a new `bb` while staging or
-an observer is active; after a terminal observer state require an explicit owner
-lifecycle decision, never silently zero/restart the context. Only a successful
-complete commit permits BEGIN. Its ordinary durable ACK gates all further
-synthetic progress. The owner must test missing/reordered/duplicated chunks,
-cross-run fragments and saturation of the bounded command queue before linking.
+Duplicate/out-of-order/conflicting fragments, wrong tokens, malformed commands,
+expiry and disconnect latch failure and erase partial staging. Queue overflow
+also cancels all queued events, including an unclaimed GO. No fragment extends
+the deadline: the2s window begins at BEGIN's USB receive timestamp and includes
+queue residence. Worker time must be monotonic and not earlier than event time.
+A new `bb` is rejected during staging, running or after use, for the same token
+or a different one. There is no reset/reuse API; initialize once per device boot,
+not per reconnect. A complete nonzero hash and correct GO produce exactly one
+immutable value-copy START request. Errors before that point produce0 starts.
+
+The caller must hold one common lock for **every** queue/staging operation:
+USB enqueue, overflow/disconnect fault, worker-next and worker acceptance of START
+into an idle observer. The worker alone touches staging/observer. `worker_next`
+must run periodically even with an empty queue so silence still expires. Hold
+that lock until the pure `vbb_observer_start` has accepted the copied request;
+never defer an unguarded START beyond unlock. Release before publishing/polling,
+and process queued faults before the next poll/ACK. This provides a defined
+linearization point: a disconnect before START acceptance cancels it; a later
+disconnect stops future work but cannot retroactively undo an accepted start.
+These headers do not contain atomics or acquire a platform lock themselves.
+The integration owner must bind the common lock correctly, not treat the queue
+as lock-free SPSC. Upstream USB line-overflow must report a sticky fault, not
+truncate into a valid command prefix. Other console commands must not be routed
+to this strict baseband parser.
+
+Interfaces are `vbb_command_enqueue`, `vbb_command_fault` and
+`vbb_command_worker_next`; START and ACK requests carry copied identity/fields.
+STOP makes the integration worker call observer-disconnect, not reset the phone.
+`tools/baseband_start_commands.py` builds an immutable tuple of six byte strings
+without opening a device or file. The additional C ASan/UBSan test covers100,000
+parser mutations, every truncation, immutable input/request copies, queue
+saturation, lost/deferred commit, clock/timeout/disconnect and single-use state.
+Five Python suites send the actual builder output to a local C harness which
+passes START and queued ACKs into the existing observer: normal completion is
+5 synthetic steps, malformed/pre-commit failure cases are0 starts/0 steps.
+Existing6 trace and10 durable observer suites and all3 AArch64 header checks pass.
 
 An ACK timeout after a published BEFORE_READ emits REFUSED/result3 at exactly
 that phase, without READ_OK or ABORT. The trace validator now accepts this precise
@@ -206,10 +243,10 @@ the generated ACK through the child's stdin. Success ends with5 synthetic steps;
 persisted-but-lost ACK, wrong ACK, disk-flush failure and disconnect end with0
 steps. Both portable headers pass freestanding AArch64 syntax checks.
 
-Before actual SMEM reads, the integration owner still must complete the bounded
-start handshake, single-owner worker queue, atomic ring adapter, capture ACK
-plumbing, and device-side dry-run validation. Exception isolation and the verified
-reset-to-Fastboot path remain separate prerequisites. Do not add a reader callback
+Before actual SMEM reads, the integration owner still must attach the tested
+staging/queue to its platform lock and worker, the atomic ring adapter and capture
+ACK plumbing, then perform device-side dry-run validation. Exception isolation
+remains required; manual recovery can be arranged for the next test. Do not add a reader callback
 to bypass those prerequisites or include this code in an already-frozen image.
 
 ## Reset and cross-reset RAM evidence
