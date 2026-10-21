@@ -355,7 +355,7 @@ static void usb_thread(void *arg __unused,wait_result_t result __unused)
         thread_block(THREAD_CONTINUE_NULL);
     }
     wr(DEVTEN,0);wr(DCTL,rd(DCTL)&~RUN);
-    thread_terminate_self();
+    thread_terminate(current_thread());
 }
 /* Require the exact known nonsecure SMMU layout and a unique identity route.
  * Never create mappings or weaken isolation just to make debug USB work. */
