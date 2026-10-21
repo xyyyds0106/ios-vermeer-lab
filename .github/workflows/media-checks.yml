@@ -1,0 +1,28 @@
+name: Bluetooth and camera host checks
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/media-checks.yml
+      - xnu/vermeer/vermeer_bt_h4.h
+      - tools/media_inventory.py
+      - tests/bt_h4_test.c
+      - tests/media_inventory_test.py
+      - tests/run-media-tests.sh
+  pull_request:
+    paths:
+      - .github/workflows/media-checks.yml
+      - xnu/vermeer/vermeer_bt_h4.h
+      - tools/media_inventory.py
+      - tests/bt_h4_test.c
+      - tests/media_inventory_test.py
+      - tests/run-media-tests.sh
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh tests/run-media-tests.sh

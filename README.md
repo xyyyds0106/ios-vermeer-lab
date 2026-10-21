@@ -2,6 +2,50 @@
 
 Experimental bring-up for Redmi K70 (vermeer / SM8550).
 
+The separate [cellular bring-up](BASEBAND.md) targets domestic calls, data and
+roaming on China's four national carriers. It currently provides tested
+QRTR/QMI and SMEM parsing plus a prepared read-only diagnostic; no cellular
+operation or carrier compatibility has been demonstrated on the handset.
+
+Bluetooth and camera bring-up currently has **no live transport or image
+capture**. `tools/media_inventory.py` reads a saved FDT and resolves GPIO,
+regulator, clock, mailbox, pinctrl and IOMMU dependencies without accessing the
+phone. It preserves parent bus addresses, ancestor availability and separate
+`hsuart0`/debug `serial0` aliases. Its output is a private device audit, not a
+register access allowlist. Run it with a local dump and a private output path:
+`python3 tools/media_inventory.py /private/live.dtb --output /private/media.json`.
+
+The K70 saved configuration contains both `qcom,kiwi` and `qcom,qca6490`
+Bluetooth candidates sharing enable GPIO81, plus four generic camera sensor
+slots. Configuration presence does not identify the fitted Bluetooth chip or
+camera sensors. The high-speed UART alias selects `0x898000` in its parent bus;
+the debug UART is a different instance at `0xa9c000`. Neither is owned by a
+new Bluetooth driver. Before touching hardware, establish the actual chip,
+UART firmware/mode, clock and power ownership, reset sequence and firmware
+requirements. Camera also needs sensor ID/calibration, CCI/CSI/ISP power and
+DMA/SMMU ownership, and an iOS capture interface.
+
+`xnu/vermeer/vermeer_bt_h4.h` provides an original portable framing core:
+fragmented HCI events/ACL/SCO/ISO, optional Qualcomm IBS control bytes only
+between packets, bounded command encoding, and validated standard local-version
+response decoding. Malformed/oversized streams are retired without scanning
+payload for a new packet. The local capacity is a policy limit, not a detected
+controller capability. This header is **not integrated into the kernel** and
+does not implement UART, IBS power management, firmware download or Apple's
+Bluetooth userspace interface. `sh tests/run-media-tests.sh` runs its ASan/UBSan
+checks and synthetic FDT/privacy/malformed-input tests; the separate media
+workflow runs those host checks without building or booting a kernel.
+
+GUI011 saved logs still show mediaserverd PC0 with preferred LR `0x194b3858c`
+after subtracting that boot's shared-cache slide, matching the earlier
+`CoreImage CI::GLContext::init+0xcc` failure during CMCapture portrait-filter
+prewarming. That is a graphics callback failure, not proof of sensor access.
+Bluetoothd repeatedly starts in the capture; no captured bluetoothd crash
+backtrace establishes why it exits. Fixing service startup and demonstrating
+Bluetooth discovery/pairing or camera frames remain separate pending milestones.
+Primary protocol references are [MiCode's pinned QCA driver](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/bluetooth/hci_qca.c)
+and [Linux v6.1 HCI wire layouts](https://github.com/torvalds/linux/blob/v6.1/include/net/bluetooth/hci.h).
+
 GUI008 (`fd9878b`, Actions39554200501) temporarily boots the retained root;
 the user confirms reaching Hello/the setup interface. The clean-root migration
 baseline returns success and repeated snapshots show SpringBoard entering
