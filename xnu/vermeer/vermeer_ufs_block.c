@@ -189,6 +189,11 @@ static int vb_ioctl(dev_t dev, u_long cmd, caddr_t data, __unused int flags,
     case DKIOCISWRITABLE: *f = vb.writable; return 0;
     case DKIOCGETMAXBLOCKCOUNTREAD: *n = 8192 / vb.secsize; return 0;
     case DKIOCGETMAXBLOCKCOUNTWRITE: *n = vb.writable ? 8192 / vb.secsize : 0; return 0;
+    /* HFS journaling uses the structured DKIOCSYNCHRONIZE request, whose
+     * ioctl encoding differs from legacy DKIOCSYNCHRONIZECACHE. A full
+     * synchronous SCSI cache flush also satisfies its barrier-only request.
+     */
+    case DKIOCSYNCHRONIZE:
     case DKIOCSYNCHRONIZECACHE: {
         lck_mtx_lock(&vermeer_ufs_lock);
         int error = vb_sync();

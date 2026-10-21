@@ -12,9 +12,25 @@ Confirmed on one K70 through custom temporary probes: linear framebuffer
 output, EL1 execution, 19.2 MHz counter, 16KB MMU and caches, virtual timer IRQs,
 and sparse access to the selected 256MB RAM window. XNU now boots a source-built
 PID1 from a journaled HFSX RAM root and independently verifies raw and VFS block
-UFS reads against Android's CRC baseline. Secondary cores, a filesystem root on UFS, Apple
-userspace and an iOS interface remain unverified. The following entries record
+UFS reads against Android's CRC baseline. The first integrated boot has now
+mounted the prepared HFS root on UFS and entered Apple's launchd/libignition,
+then stopped when the dyld shared cache was rejected by filesystem policy.
+Secondary cores, sustained Apple service startup and an iOS interface remain
+unverified. The following entries record
 the individual milestones, including failures that have since been resolved.
+
+Latest integrated001 photo: `VermeerIOSRoot002` mounts, `/sbin/launchd` enters
+libignition, then shared-cache mapping reports `vnode is not SIP-protected`.
+PID1 exits because `libSystem.B.dylib` cannot be found outside that cache, and
+XNU panics. This is an Apple userspace entry result, not a working iOS session.
+The next integrated image adds only `CSR_ALLOW_UNRESTRICTED_FS` in the iOS ADT
+(`lp-sip0` u64=2), plus the unsealed-root flag (`lp-sip1` u32=1), using XNU's
+existing local-policy path. Ownership, code-signature and cache-directory checks
+remain in place. Diagnostic ADTs have no policy change. The adapter also handles
+HFS's structured `DKIOCSYNCHRONIZE` via the existing full SCSI cache flush;
+the previous legacy-only ioctl caused journal flush errors `0x19` (ENOTTY).
+The prepared root is already on the phone; the repair needs a temporary kernel
+boot, not another root flash. These repairs are not yet hardware-verified.
 
 The workflow is manual-only, has read-only repository permissions and a
 45-minute job limit. It does not contain Apple firmware or device dumps.

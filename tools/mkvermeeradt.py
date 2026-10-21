@@ -60,6 +60,14 @@ def build(highram=False, ios=False):
     if ios:
         chosen = next(c for c in result.children if c.name == 'chosen')
         chosen.props.append(('boot-manifest-hash', 0, hashlib.sha384(b'vermeer experimental iOS root').digest()))
+        # kern_csr.c reads lp-sip0 as u64 and lp-sip1 as u32. The copied
+        # HFS root has no SF_RESTRICTED flag on dyld caches; vm_unix.c rejects
+        # their shared mappings unless CSR_ALLOW_UNRESTRICTED_FS (bit1) is set.
+        # Relax only filesystem policy, and declare the already-unsealed root.
+        # Diagnostic trees keep their existing policy and have no asmb node.
+        chosen.children.append(node('asmb', [
+            ('lp-sip0', u64(0x2)), ('lp-sip1', u32(1)),
+        ]))
         defaults = next(c for c in result.children if c.name == 'defaults')
         defaults.props.append(('no-effaceable-storage', 0, b''))
     return result
