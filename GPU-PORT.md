@@ -91,7 +91,35 @@ driver stopped before a touch transaction; it did not turn that into an input
 success. The upstream sheng probe's SMMU-bypass operation is also not a substitute
 for establishing ownership of this board's DMA stream/context.
 
-Upstream code is retained privately for review. Any vendored source will retain
-its component license; NativeAdreno/NativeMetal/ArmSmmu4K use MIT and several
-platform kits use BSD-2-Clause-Patent. Apple images, device backups, private
-captures and extracted firmware are not included in this repository.
+## Local 16KB memory port
+
+`gpu/` now contains pinned open-source memory, SMMU, PM4 and HFI foundations,
+with component licenses and upstream hashes in `gpu/UPSTREAM.json`. The memory
+port separates requested GPU bytes from exclusively owned CPU-page extents.
+Allocations and pool splits own whole native 4KB or16KB pages, while exposed
+GPU spans retain4KB granularity and do not expose allocation padding. Cache
+attribute operations use the kernel's native PAGE_SHIFT. Imported user memory
+keeps its cache attributes and is maintained through physical spans.
+
+Read-only imports refuse GPU-write publication and write acquisition. A pool
+cannot become write-combined while it has live allocations. Outstanding device
+references refuse release; failed completion/cache restoration quarantines the
+allocation. Device references still require real completion/unmapping by the
+future submission driver.
+
+Run `CC=clang CXX=clang++ sh tests/run-gpu-touch-tests.sh`. ASan/UBSan tests
+execute the production memory implementation with injected descriptor, cache
+and allocation failures, native4KB/16KB layouts, hidden padding, imports and pool
+lifetime checks. All15 local GPU translation units also pass syntax compilation
+with the retained K70 ARM64/16KB kernel recipe. ARM cache instructions and real
+device memory visibility remain hardware tests.
+
+These sources are not included in the kernel profile or registered as an
+accelerator. GMU power/firmware, owned GPU SMMU contexts, submission/fences,
+IOAccelerator/Metal ABI and scanout integration remain unfinished. Current
+images still render through CPU copies. No new GPU-enabled boot image is
+produced by these tests.
+
+NativeAdreno/NativeMetal/ArmSmmu4K use MIT and several platform kits use
+BSD-2-Clause-Patent. Apple images, device backups, private captures and extracted
+firmware are not included in this repository.

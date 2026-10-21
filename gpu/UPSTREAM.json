@@ -1,0 +1,236 @@
+{
+  "description": "Pinned open-source foundations; no firmware binaries. Hashes identify upstream originals; local sources include K70 adaptations.",
+  "files": [
+    {
+      "path": "gpu/NativeAdreno/LICENSE",
+      "repository": "UniXNU/NativeAdreno",
+      "commit": "805c7e4bfb7451eb6923f4a14dea8c657b9be7d2",
+      "upstream_git_blob": "8803ca3258ca670bd45c3ee0d411aa8297932a73",
+      "upstream_sha256": "16fbc0170994a48f60938d9f0d992d3bad113383cf90882f75c206e079c2a2dc"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoCpu.cpp",
+      "repository": "UniXNU/NativeAdreno",
+      "commit": "805c7e4bfb7451eb6923f4a14dea8c657b9be7d2",
+      "upstream_git_blob": "862de46510645e477364157715228c6acba491d2",
+      "upstream_sha256": "b22d613d1c8a73e33ef1ccaf02e0e5096a96c7a7c08ec911dea7b6df4e5e0515"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoMemory.cpp",
+      "repository": "UniXNU/NativeAdreno",
+      "commit": "805c7e4bfb7451eb6923f4a14dea8c657b9be7d2",
+      "upstream_git_blob": "cec75a7ecc3034f2cde3f5f9f82600258279dffb",
+      "upstream_sha256": "dc19ce56bec214de53281abb15c1798dfd70a2c1c4f04fe5ac76c8000cf92631"
+    },
+    {
+      "path": "gpu/NativeAdreno/NativeAdrenoMemory.h",
+      "repository": "UniXNU/NativeAdreno",
+      "commit": "805c7e4bfb7451eb6923f4a14dea8c657b9be7d2",
+      "upstream_git_blob": "f91b19ec9365d579558a0e9a802a23549891ea91",
+      "upstream_sha256": "8137491b5ef2657eb362a4f41cf2c2b8d8cb747fc93d7a63e453194d7c3288cc"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4K.c",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "be5f30249235cb6e2f219b827e01c9448a7fa9aa",
+      "upstream_sha256": "0adb19b483e56e723014ed6cfe2c29f9d9735ae2770f62cf0057b22937dbd157"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4K.h",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "1b09a295aba4137638784d7dfb7f0554a972c5ad",
+      "upstream_sha256": "e25063b9134afc7eb79e7c030bc2858608cf0ade5da714d5dfd600fee5007e8e"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KAudit.c",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "9e4e9a5a7f30cd2c092f658350c768a8ea1bbd75",
+      "upstream_sha256": "594739cebc43926b1cb0a0e965867bcf1edfb90fab9c51465b65fa47be3755c1"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KAudit.h",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "147ad654d5b680d8cea0074d8ec4d0dc6ebaef13",
+      "upstream_sha256": "1f313acd46db3dfecc115b8c885c5c43f7d23f73690a6157f900dfc77b2c9f6a"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KContext.c",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "2cc334e44d4d18d7e024d5c0dfec9f72c413c4c2",
+      "upstream_sha256": "b8e32e32d1f07e71de65f31b12963ab8b01c05755f8c60c2d6f40cb03fe4eca8"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KContext.h",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "3c2faa4b285fedfa765b28944caf218e47e3c36a",
+      "upstream_sha256": "c842e78f37eab2e7cbba28cb89f4b993d9202503e75fee9e49a871101b936e53"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KLive.c",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "a400d3f5e50ead2b089defd43af6a65a4b0131e1",
+      "upstream_sha256": "a50375331e7e3affc1b4ff9048508a75c080a468eff7c8f513b1f9937e2ba010"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KLive.h",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "d796657dbe22feb42baea32a747ee2e39693d2be",
+      "upstream_sha256": "7532ad419d630dd308628e60746860c992499474d14237f3f39e04e20e0722bb"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KMmio.c",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "df974ba1c6af97319d4b1c979423ecbb520bbfcd",
+      "upstream_sha256": "439e6b50a3431c607611aa3b9af1f4f548e53b2fa1c452645a458c0606f7df38"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KMmio.h",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "52a2d37c3017d2db736bc5e7cdc9cde5cbdbae60",
+      "upstream_sha256": "face552cf67de969e8e741c0195496949f2c62b418d973e4d71a02f18ab83109"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KProgram.c",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "2cb6695064c18fa9ef84ed6f2c9c1b2d3f752728",
+      "upstream_sha256": "3b1d4911b0a48f90b09c721ffd2eb95dbfc02e96165009b23f8c98841f36e2b0"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KProgram.h",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "25ccf6d31bda9bcce6235d828fff763ed8ddaff6",
+      "upstream_sha256": "171900c3ed400b805c3a1587959f66bc4a19db18aedc8111e862651a90bb8d8f"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KStreams.c",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "4145ef2c642f7f603fa6f3742a9ea88654ba76b0",
+      "upstream_sha256": "359610de6974c1885b4b7bbf72e6b321a013e1cc44200e1a8f566d09722c009a"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KStreams.h",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "56d3d2e2647abe9790d570fec52974689de74f1f",
+      "upstream_sha256": "1cfca0b4e3acba420cc829098b52d61c4905ec64d2aa57883dedae9dfb212969"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KTableMemory.c",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "c21faa9660acbdcd275f355c7b5b7075a2e3e018",
+      "upstream_sha256": "b39d3d4fc292b921672c089e930986345637aa029b422821867c72e7203feb92"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/ArmSmmu4KTableMemory.h",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "da4f92a5fe7f064f5243136a277f910e80dda871",
+      "upstream_sha256": "316b85ee835686744feb7777b4216917578833e3ff510aeecc4bbe8325568f86"
+    },
+    {
+      "path": "gpu/ArmSmmu4K/LICENSE",
+      "repository": "UniXNU/ArmSmmu4K",
+      "commit": "4d0d6598b1a36aeec3de01091893fa6660e49388",
+      "upstream_git_blob": "f5c414937b4ed3a6ab74952b5c2f29ad4471f563",
+      "upstream_sha256": "7a730b868c1ff986cdfc210a7b140ab4e0a31bf7db1d15db901427973efaa70f"
+    },
+    {
+      "path": "gpu/AdrenoFirmware/AdrenoFirmware.c",
+      "repository": "UniXNU/AdrenoFirmware",
+      "commit": "40fdb8ea87606612ac6f1e80bbb49955d0ce4051",
+      "upstream_git_blob": "e776c8078b807812e052d6723e78724f032f7f38",
+      "upstream_sha256": "c3cc714a65ce90216a0fc5c6f0e102ae1769c45e559c08f94a0b5f6fa3e97070"
+    },
+    {
+      "path": "gpu/AdrenoFirmware/AdrenoFirmware.h",
+      "repository": "UniXNU/AdrenoFirmware",
+      "commit": "40fdb8ea87606612ac6f1e80bbb49955d0ce4051",
+      "upstream_git_blob": "9588fa792aa15526c99aa3fd478d675bb5e9b48c",
+      "upstream_sha256": "6b2e308f2feae92642f21da2667c3665a2e234ef79e7c5400e7aac7dd3c5b7ed"
+    },
+    {
+      "path": "gpu/AdrenoFirmware/AdrenoHfi.c",
+      "repository": "UniXNU/AdrenoFirmware",
+      "commit": "40fdb8ea87606612ac6f1e80bbb49955d0ce4051",
+      "upstream_git_blob": "a398d2f5467bd1c60c3416974d5623874d8e16d6",
+      "upstream_sha256": "5d7da3145157fd945d626d4567c95626fdbbc8fb6a65d8f67701ffb1e64f7d2e"
+    },
+    {
+      "path": "gpu/AdrenoFirmware/AdrenoHfi.h",
+      "repository": "UniXNU/AdrenoFirmware",
+      "commit": "40fdb8ea87606612ac6f1e80bbb49955d0ce4051",
+      "upstream_git_blob": "15986b53311704b43aec43edc55751381b80d0b6",
+      "upstream_sha256": "615cb21d1c7bd3729e3b36d361f0f78bbaacb1bd8931a268797e00505e05f0b8"
+    },
+    {
+      "path": "gpu/AdrenoFirmware/AdrenoHfiStartup.c",
+      "repository": "UniXNU/AdrenoFirmware",
+      "commit": "40fdb8ea87606612ac6f1e80bbb49955d0ce4051",
+      "upstream_git_blob": "a1367682b5f8f99a0b6ccbe21535777eed6bf89b",
+      "upstream_sha256": "0bdc60bb35aae37e01a2466e6ecf95ed7c444389526ec8471e2a2422624a6c81"
+    },
+    {
+      "path": "gpu/AdrenoFirmware/AdrenoHfiStartup.h",
+      "repository": "UniXNU/AdrenoFirmware",
+      "commit": "40fdb8ea87606612ac6f1e80bbb49955d0ce4051",
+      "upstream_git_blob": "0496c6fc9c3a34f279cb16ef61023ee727feb2a1",
+      "upstream_sha256": "03878418998c4e75ccf5a3ee9112631f676ae5a604cb453c52ea480e0826f4e1"
+    },
+    {
+      "path": "gpu/AdrenoFirmware/AdrenoHfiVotes.c",
+      "repository": "UniXNU/AdrenoFirmware",
+      "commit": "40fdb8ea87606612ac6f1e80bbb49955d0ce4051",
+      "upstream_git_blob": "f3ce145975852ead660a3a4c8de32db10d9164b9",
+      "upstream_sha256": "20f021f8eeb9d32def09c3d5d58c6fd97e96b77932113f373d634ab6d184abda"
+    },
+    {
+      "path": "gpu/AdrenoFirmware/AdrenoHfiVotes.h",
+      "repository": "UniXNU/AdrenoFirmware",
+      "commit": "40fdb8ea87606612ac6f1e80bbb49955d0ce4051",
+      "upstream_git_blob": "48081fff30b33f2e324ccacb8a00ddb872b52ffd",
+      "upstream_sha256": "6e8e89a0b947868f103b241ca86e3c25aa6229a54bc581022728b4eda9070f4c"
+    },
+    {
+      "path": "gpu/AdrenoFirmware/LICENSE",
+      "repository": "UniXNU/AdrenoFirmware",
+      "commit": "40fdb8ea87606612ac6f1e80bbb49955d0ce4051",
+      "upstream_git_blob": "217b4df4b4037c3b6cd4522a3909d3223f1ec1ac",
+      "upstream_sha256": "03a8ab50f4b3b4c65f070d07302a3522e7badbf54dde090cca59bb3e746bba3f"
+    },
+    {
+      "path": "gpu/AdrenoPM4/AdrenoPM4.c",
+      "repository": "UniXNU/AdrenoPM4",
+      "commit": "445f8fe6d115738352b9d78dc70af6d61aa7f62f",
+      "upstream_git_blob": "12b293640ca8885183e0bf8a0a756e1f5570fdd3",
+      "upstream_sha256": "c4b0227859a1e771c5f349524b718b08444f518ef960bfa4b50f6fd4ab30ad2f"
+    },
+    {
+      "path": "gpu/AdrenoPM4/AdrenoPM4.h",
+      "repository": "UniXNU/AdrenoPM4",
+      "commit": "445f8fe6d115738352b9d78dc70af6d61aa7f62f",
+      "upstream_git_blob": "ceaefa233ac357face8f0ef5d8801c7849b8ffb0",
+      "upstream_sha256": "86f4e84eece0f2e67f786d03cea8b82c696377fc5af9f890dd164bbfe24abd29"
+    },
+    {
+      "path": "gpu/AdrenoPM4/LICENSE",
+      "repository": "UniXNU/AdrenoPM4",
+      "commit": "445f8fe6d115738352b9d78dc70af6d61aa7f62f",
+      "upstream_git_blob": "9bcaf670ca29916983de09d9659d5fa8c7895660",
+      "upstream_sha256": "199298ccf9aba4cfe9d364199ff19b9d0688b07d83b770b313cf80a6a3924c69"
+    }
+  ]
+}

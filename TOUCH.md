@@ -48,6 +48,34 @@ scaling, multi-contact release,1..1032-byte FIFO transfers and tails, impossible
 FIFO counts, error/timeout retirement. These checks cannot establish rail state,
 firmware compatibility, electrical communication, IRQ behavior or real touch.
 
+## DMA transport work
+
+GUI011 hardware evidence passes clock preflight but finds FIFO disabled. It
+stops before a GT9916 transaction, so the FIFO-only driver above cannot handle
+that observed state.
+
+`vermeer_geni_dma.h` adds a separately tested internal-DMA transfer core. It
+requires distinct, retained, whole CPU pages for TX/RX, a live board route/power
+authorization callback and synchronous cache-maintenance callbacks. It preserves
+upper physical-address words, arms RX before TX, latches TX/RX/master completion
+separately, and requires an idle command engine plus successful CS deassertion
+before invalidating/copying RX. Any transfer error retires the bus and quarantines
+the pages and stream mapping until reboot. Abort/idle alone never authorizes
+freeing DMA memory. An authorization or initial cache failure starts no command.
+
+`tests/run-gpu-touch-tests.sh` covers every1..1032-byte transfer for4KB/16KB
+pages, high physical addresses, stale and staggered completion, missing TX/RX/
+master completion, active-engine timeout, bus errors and cache failures. The
+core also passes a standalone ARM64 compilation with the current XNU recipe.
+
+The core is not yet called by `vermeer_touch.c` or copied into a boot profile.
+Board integration still needs the actual wrapper SID0xa3 route and exclusive
+mapping ownership, permanent native-page DMA allocation/cache callbacks, and
+verified reset24/IRQ25 plus AVDD/IOVDD readiness. GUI011's reset IO sample0 does
+not establish the GPIO configuration or rail state. Those facts cannot be
+derived from the host register model. Keep the existing driver stopped until
+they are established; another unchanged FIFO-only boot will not repair touch.
+
 Protocol/register references (no binary firmware included):
 
 - [MiCode GENI SPI](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/spi/spi-geni-qcom.c),
