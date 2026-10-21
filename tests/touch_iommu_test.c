@@ -116,7 +116,8 @@ static void rejects(void)
 {
     for(unsigned type=0;type<4;type++)if(type!=2) {
         struct fixture *f=make(NORMAL);f->reg[0x80c/4]=0x800000b6;f->reg[0xc0c/4]=type<<16;
-        assert(!vti_prepare(&f->v) && !f->writes && f->v.error==VTI_BUSY);destroy(f);
+        assert(!vti_prepare(&f->v) && !f->writes && f->v.error==VTI_BUSY);
+        assert(f->v.conflict==VTI_CONFLICT_FOREIGN_SID && f->v.conflict_s2cr==(type<<16));destroy(f);
     }
     struct fixture *f=make(NORMAL);f->reg[0x80c/4]=0x80ff00b0;
     assert(!vti_prepare(&f->v) && !f->writes);destroy(f);
@@ -125,7 +126,13 @@ static void rejects(void)
     f=make(NORMAL);f->reg[0x24/4]^=1;
     assert(!vti_prepare(&f->v) && !f->writes);destroy(f);
     f=make(NORMAL);for(unsigned i=0;i<70;i++)f->reg[(0x80000+4096*i)/4]=1;
-    assert(!vti_prepare(&f->v) && !f->writes);destroy(f);
+    assert(!vti_prepare(&f->v) && !f->writes && f->v.conflict==VTI_CONFLICT_NO_BANK && f->v.enabled_banks==70);destroy(f);
+    /* Synthetic unknown ACTLR bits remain a refusal, never permission to
+     * clear Qualcomm configuration just to make an allocation succeed. */
+    f=make(NORMAL);for(unsigned i=0;i<70;i++)f->reg[(0x80004+4096*i)/4]=0x301;
+    assert(!vti_prepare(&f->v) && !f->writes && f->v.conflict==VTI_CONFLICT_NO_BANK);
+    assert(f->v.enabled_banks==1 && f->v.reserved_banks==1 && f->v.unsafe_actlr_banks==68);
+    assert(f->v.first_unsafe_bank==1 && f->v.first_unsafe_actlr==0x301);destroy(f);
 }
 static void failures(void)
 {

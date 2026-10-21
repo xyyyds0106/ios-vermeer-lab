@@ -8,6 +8,10 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 no_pie=
 if [ "$(uname -s)" = Linux ]; then no_pie=-no-pie; fi
+"${CC:-clang}" -std=c11 -Wall -Wextra -Werror -g \
+    -fsanitize=address,undefined -fno-omit-frame-pointer $no_pie \
+    "$root/tests/adreno_cmd_db_test.c" "$root/gpu/AdrenoFirmware/AdrenoCmdDb.c" -o "$tmp/cmd_db"
+UBSAN_OPTIONS=halt_on_error=1 "$tmp/cmd_db"
 for test in frame_policy goodix_packet geni_spi geni_dma touch_clock touch_route gpi gpi_transport; do
   "${CC:-clang}" -std=c11 -Wall -Wextra -Werror -g \
     -fsanitize=address,undefined -fno-omit-frame-pointer $no_pie \

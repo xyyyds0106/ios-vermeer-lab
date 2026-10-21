@@ -22,6 +22,10 @@ with tempfile.TemporaryDirectory() as folder:
         assert '+++ b/bsd/dev/'+name in all_patches
     assert '+++ b/bsd/dev/sweet_touch.c' not in all_patches
     assert '+++ b/bsd/dev/vermeer_rpmh_board.c' in all_patches
+    assert '+++ b/bsd/dev/AdrenoCmdDb.c' in all_patches
+    assert '+++ b/bsd/dev/AdrenoCmdDb.h' in all_patches
+    assert 'VERMEER IOMMU: phase=' in all_patches
+    assert 'VERMEER GPU DB:' in all_patches
     assert '+++ b/iokit/Kernel/arm/vermeer_rpmh_pm.cpp' in all_patches
     assert 'iokit/Kernel/arm/vermeer_rpmh_pm.cpp\t\toptional iokitcpp' in all_patches
     assert 'bsd/dev/vermeer_rpmh_pm.cpp' not in all_patches

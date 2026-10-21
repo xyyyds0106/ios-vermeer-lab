@@ -156,6 +156,10 @@ if gui:
         component = 'iokit/Kernel/arm/' if name.endswith('.cpp') else 'bsd/dev/'
         generated += ''.join(difflib.unified_diff([], data.splitlines(True),
             fromfile='/dev/null', tofile='b/' + component + name))
+    for name in ('AdrenoCmdDb.c','AdrenoCmdDb.h'):
+        data=(source.parent.parent / 'gpu/AdrenoFirmware' / name).read_text()
+        generated += ''.join(difflib.unified_diff([],data.splitlines(True),
+            fromfile='/dev/null',tofile='b/bsd/dev/'+name))
     generated += (source.parent / 'vermeer/0069-vermeer-rpmh-hook.patch').read_text()
     generated += (source.parent / 'vermeer/vermeer_rpmh_pm_hook.patch').read_text()
     (target / '0069-vermeer-rpmh.patch').write_text(generated)

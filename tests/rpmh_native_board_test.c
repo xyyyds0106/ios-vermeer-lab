@@ -25,9 +25,10 @@ static struct {
     uint32_t rsc[0x10000/4],gpio[PAGE_SIZE/4],gic[PAGE_SIZE/4];uint8_t db[0x20000];
     const struct vtp_ops *ops;
     uint64_t now;
-    unsigned enabled,hook,pm,register_fail,maps,reads,writes,gpio_writes,pm_calls;
+    unsigned enabled,hook,pm,register_fail,maps,reads,writes,gpio_writes,pm_calls,gpu_probe;
     unsigned trap_at,noirq,stuck_reset,malformed_map;
     unsigned rsc_writes,triggered;
+    unsigned gpu_copy_reads,gpu_copy_change;
     const uint8_t *boot_fdt;unsigned boot_fdt_bytes;
     jmp_buf fault;
 } hw;
@@ -41,7 +42,10 @@ static vm_offset_t io_map(vm_map_offset_t pa,vm_size_t size,unsigned attr,vm_pro
     return hw.malformed_map?0:(uintptr_t)hw.gpio;
 }
 static int PE_parse_boot_argn(const char *key,void *out,size_t bytes)
-{assert(!strcmp(key,"vermeer_rpmh") && bytes==sizeof(int));*(int *)out=(int)hw.enabled;return 1;}
+{assert(bytes==sizeof(int));
+ if(!strcmp(key,"vermeer_rpmh"))*(int *)out=(int)hw.enabled;
+ else {assert(!strcmp(key,"vermeer_gpu_probe"));*(int *)out=(int)hw.gpu_probe;}
+ return 1;}
 static int SecureDTLookupEntry(void *base,const char *path,DTEntry *entry)
 {(void)base;assert(!strcmp(path,"/") || !strcmp(path,"/chosen"));*entry=(void *)path;return kSuccess;}
 static int SecureDTGetProperty(DTEntry entry,const char *name,const void **value,unsigned *bytes)
@@ -80,7 +84,9 @@ static uint32_t model_load(vm_offset_t va,uint64_t pa)
     }
     if(pa>=0x81c60000 && pa<0x81c80000) {
         assert(va==(uintptr_t)hw.db+pa-0x81c60000);
-        return vrp_u32(hw.db+(pa-0x81c60000));
+        uint32_t value=vrp_u32(hw.db+(pa-0x81c60000));
+        if(hw.gpu_probe && vrb_gpu_db_used && ++hw.gpu_copy_reads>32768 && hw.gpu_copy_change)value^=1;
+        return value;
     }
     if(pa==0x17100104 || pa==0x17100304) {
         assert(va==(uintptr_t)hw.gic+pa-0x17100000);return hw.gic[(pa-0x17100000)/4];
@@ -158,6 +164,13 @@ int main(int argc,char **argv)
         assert(!hw.ops->valid(NULL) && !vermeer_rpmh_active_valid(&gpu) && vrb.retired && vrb.awake);
         assert(access_count==hw.reads+hw.writes); /* no MMIO from validate/quarantine */
     }
+    reset(0x300);hw.gpu_probe=1;vrb_gpu_db_used=0;vrb_gpu_db=(struct AdrenoCmdDb){0};
+    assert(vermeer_rpmh_touch_start(fdt,bytes) && hw.ops->acquire(NULL));
+    assert(vrb_gpu_db_used && vrb_gpu_db.complete && vrb_gpu_db.status==AdrenoCmdDbMissing);
+    assert(vrb_gpu_db.entries==2 && !vrb_gpu_db.found_mask && hw.triggered==2 && hw.rsc_writes==42);
+    reset(0x300);hw.gpu_probe=1;hw.gpu_copy_change=1;vrb_gpu_db_used=0;vrb_gpu_db=(struct AdrenoCmdDb){0};
+    assert(vermeer_rpmh_touch_start(fdt,bytes) && hw.ops->acquire(NULL));
+    assert(vrb_gpu_db_copy_status==102 && !vrb_gpu_db.complete && hw.triggered==2 && hw.rsc_writes==42);
     reset(0x300);hw.enabled=0;assert(!vermeer_rpmh_touch_start(fdt,bytes) && !hw.maps && !hw.ops);
     reset(0x300);hw.hook=0;assert(!vermeer_rpmh_touch_start(fdt,bytes) && !hw.maps && !hw.ops);
     reset(0x300);assert(!vermeer_rpmh_touch_start(fdt,bytes-1) && !hw.maps && !hw.ops);

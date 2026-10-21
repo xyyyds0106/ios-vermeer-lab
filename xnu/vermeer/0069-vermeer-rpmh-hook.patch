@@ -1,9 +1,10 @@
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -113,4 +113,5 @@
+@@ -113,4 +113,6 @@
  bsd/dev/vermeer_touch_smmu_tables.c	standard
  bsd/dev/vermeer_touch_smmu_context.c	standard
 +bsd/dev/vermeer_rpmh_board.c		standard
++bsd/dev/AdrenoCmdDb.c			standard
  bsd/dev/memdev.c			standard
  bsd/dev/mem.c				standard
 --- a/iokit/conf/files

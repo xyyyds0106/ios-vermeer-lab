@@ -213,7 +213,14 @@ static int vtg_prepare(void)
         }
         disable_preemption();int mapped=vti_prepare(&touch.iommu);enable_preemption();
         if(!mapped) {
-            vtg_status();printf("VERMEER TOUCH: SIDb6 owned 4K mapping failed reason=%u; all pages retained\n",touch.iommu.error);return 0;
+            const struct vti *v=&touch.iommu;
+            vtg_status();printf("VERMEER TOUCH: SIDb6 owned 4K mapping failed reason=%u; all pages retained\n",v->error);
+            printf("VERMEER IOMMU: phase=%u index=%u conflict=%u slot=%u bank=%u touched=%u valid-routes=%u\n",
+                v->scan_phase,v->scan_index,v->conflict,v->slot,v->bank,v->touched,v->valid_routes);
+            printf("VERMEER IOMMU: enabled=%u reserved-disabled=%u unsafe-actlr=%u first-bank=%u actlr=%08x smr=%08x s2cr=%08x\n",
+                v->enabled_banks,v->reserved_banks,v->unsafe_actlr_banks,v->first_unsafe_bank,
+                v->first_unsafe_actlr,v->conflict_smr,v->conflict_s2cr);
+            return 0;
         }
     }
     touch.transport=(struct vgpt){.io={NULL,vtg_lease,vtg_read,vtg_write,vtg_cache,vtg_now,vtg_pause,vtg_idle}};

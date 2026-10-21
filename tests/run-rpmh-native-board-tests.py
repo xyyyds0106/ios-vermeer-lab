@@ -29,8 +29,8 @@ with tempfile.TemporaryDirectory() as tmp:
     compiler=os.environ.get('CC','clang-14')
     subprocess.run([compiler,'-std=gnu11','-Wall','-Wextra','-Werror',
         '-Wno-gnu-statement-expression','-g','-O1','-no-pie','-fsanitize=address,undefined',
-        '-I'+str(out),'-I'+str(root/'xnu/vermeer'),
-        str(root/'tests/rpmh_native_board_test.c'),'-o',str(out/'native')],check=True)
+        '-I'+str(out),'-I'+str(root/'xnu/vermeer'),'-I'+str(root/'gpu/AdrenoFirmware'),
+        str(root/'tests/rpmh_native_board_test.c'),str(root/'gpu/AdrenoFirmware/AdrenoCmdDb.c'),'-o',str(out/'native')],check=True)
     synthetic=out/'synthetic-fixed-contract.dtb';synthetic.write_bytes(fixture())
     fdt=Path(sys.argv[1]) if len(sys.argv)==2 else synthetic
     subprocess.run([str(out/'native'),str(fdt)],check=True,

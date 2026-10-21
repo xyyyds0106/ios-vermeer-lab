@@ -18,6 +18,7 @@
 #include "vermeer_rpmh_board.h"
 #include "vermeer_rpmh_board_dt.h"
 #include "vermeer_rpmh_touch_native.h"
+#include "AdrenoCmdDb.h"
 #include "vermeer_touch_power_if.h"
 /* BSD's build does not expose the MACH/PEXPERT-private declaration in
  * arm/machine_routines.h. Match the actual kernel function's full signature;
@@ -153,6 +154,44 @@ static int vrb_db_read(void *ctx,uint32_t off,uint32_t n,uint8_t *dst)
 }
 static int vrb_record(void *ctx,const struct vrp_event *e)
 {(void)ctx;if(!e || !vrb_proof(NULL))return 0;vrb.last_event=*e;return 1;}
+/* Optional GPU dependency capture under the SAME live platform lease.
+ * This only reads the qualified fixed reserved command-DB window. It does
+ * not vote GPU power, touch GPU registers or publish an accelerator. */
+static uint8_t vrb_gpu_db_copy[ADRENO_CMD_DB_BYTES];
+static struct AdrenoCmdDb vrb_gpu_db;
+static unsigned vrb_gpu_db_used;
+static unsigned vrb_gpu_db_copy_status;
+static void vrb_gpu_db_probe(void)
+{
+    int enabled=0;
+    if(!PE_parse_boot_argn("vermeer_gpu_probe",&enabled,sizeof(enabled)) || enabled!=1 || vrb_gpu_db_used)return;
+    vrb_gpu_db_used=1;
+    uint64_t start=vrb_now(NULL),last=start;uint8_t check[128];unsigned error=0;
+    for(unsigned pass=0;pass<2 && !error;pass++)for(unsigned off=0;off<ADRENO_CMD_DB_BYTES;off+=sizeof(check)) {
+        uint64_t now=vrb_now(NULL);
+        if(now<last || now-start>=5000000 || !vrb_proof(NULL)){error=100;break;}
+        last=now;
+        uint8_t *dst=pass?check:vrb_gpu_db_copy+off;
+        if(!vrb_db_read(NULL,off,sizeof(check),dst)){error=101;break;}
+        now=vrb_now(NULL);
+        if(now<last || now-start>=5000000 || !vrb_proof(NULL)){error=100;break;}
+        last=now;
+        if(pass && memcmp(check,vrb_gpu_db_copy+off,sizeof(check))){error=102;break;}
+    }
+    vrb_gpu_db_copy_status=error;
+    if(error){printf("VERMEER GPU DB: copy refused status=%u; no GPU I/O\n",error);return;}
+    unsigned status=AdrenoCmdDbParse(vrb_gpu_db_copy,sizeof(vrb_gpu_db_copy),1,&vrb_gpu_db);
+    printf("VERMEER GPU DB: status=%u complete=%u rows=%u entries=%u found=%02x stable-two-pass=1 gpu-enabled=0\n",
+        status,vrb_gpu_db.complete,vrb_gpu_db.rows,vrb_gpu_db.entries,vrb_gpu_db.found_mask);
+    if(!vrb_gpu_db.complete)return;
+    for(unsigned i=0;i<AdrenoCmdDbResources;i++)if(vrb_gpu_db.found_mask&(1u<<i)) {
+        const struct AdrenoCmdDbResource *r=&vrb_gpu_db.resource[i];uint32_t words[8]={0};
+        for(unsigned k=0;k<r->aux_bytes;k++)words[k/4]|=(uint32_t)r->aux[k]<<((k%4)*8);
+        printf("VERMEER GPU DB: name=%s addr=%08x version=%04x aux-bytes=%u aux=%08x/%08x/%08x/%08x/%08x/%08x/%08x/%08x\n",
+            AdrenoCmdDbResourceName(i),r->address,r->version,r->aux_bytes,
+            words[0],words[1],words[2],words[3],words[4],words[5],words[6],words[7]);
+    }
+}
 static void vrb_wait(void *ctx,unsigned us)
 {(void)ctx;if(us<=50000)delay(us);}
 static int vrb_reset_assert(void *ctx)
@@ -225,6 +264,8 @@ static int vrb_touch_acquire(void *ctx)
     delay(100000);
     if(!vrb_proof(NULL) || (vrb_load(vrb.reset+4,VRB_RESET_PA+4)&3u)!=3u ||
        (vrb_load(vrb.reset,VRB_RESET_PA)&0x3ffu)!=0x2c3u)goto failed;
+    vrb_gpu_db_probe();
+    if(!vrb_proof(NULL))goto failed;
     os_atomic_store(&vrb.ready,1,release);
     vermeer_rpmh_controller_finish(&vrb.touch_lease,VRB_RETAIN_ACTIVE);
     printf("VERMEER RPMH: two touch rail ACKs; reset high; ACTIVE idle hold retained\n");return 1;

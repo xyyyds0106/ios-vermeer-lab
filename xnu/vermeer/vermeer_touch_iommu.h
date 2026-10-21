@@ -18,15 +18,23 @@ struct vti_ops {
     int (*pause_us)(void *,unsigned);
 };
 enum {VTI_OK,VTI_ARGUMENT,VTI_LEASE,VTI_IO,VTI_LAYOUT,VTI_BUSY,VTI_TABLES,VTI_TIMEOUT,VTI_READBACK};
+enum {VTI_CONFLICT_NONE,VTI_CONFLICT_SID_ALIAS,VTI_CONFLICT_FOREIGN_SID,
+      VTI_CONFLICT_NO_SLOT,VTI_CONFLICT_NO_BANK,VTI_CONFLICT_NO_ASID,
+      VTI_CONFLICT_SMR_CHANGED,VTI_CONFLICT_S2CR_CHANGED};
 struct vti {
     struct vti_ops io;uint64_t physical[5],table_pa;void *table_cpu;
     ArmSmmu4KConfig config;ArmSmmu4KResult tables;ArmSmmu4KContextConfig context;
     ArmSmmu4KContextImage image;
     unsigned slot,bank,asid,error,touched,attached,retired;uint32_t old_smr,old_s2cr;
     uint64_t begin,last;
+    /* Retained observations only; printing failures never adds device I/O. */
+    unsigned scan_phase,scan_index,conflict,valid_routes,enabled_banks,reserved_banks,unsafe_actlr_banks;
+    unsigned first_unsafe_bank;uint32_t first_unsafe_actlr,conflict_smr,conflict_s2cr;
 };
 static inline int vti_fail(struct vti *v,unsigned error)
 {v->error=error;v->retired=1;return 0;}
+static inline int vti_busy(struct vti *v,unsigned conflict)
+{v->conflict=conflict;return vti_fail(v,VTI_BUSY);}
 static inline int vti_guard(struct vti *v)
 {
     uint64_t now;
@@ -50,6 +58,7 @@ static inline int vti_prepare(struct vti *v)
        v->table_pa<UINT64_C(0x8c0000000) || v->table_pa>UINT64_C(0x940000000)-16384)return 0;
     if(v->io.now_us(v->io.ctx,&v->last)!=1)return vti_fail(v,VTI_TIMEOUT);
     v->begin=v->last;
+    v->scan_phase=1;
     uint32_t id0,id1,id2,cr0,global;
     if(!vti_rd(v,0x20,&id0) || !vti_rd(v,0x24,&id1) || !vti_rd(v,0x28,&id2) ||
        !vti_rd(v,0,&cr0) || !vti_rd(v,0x48,&global))return 0;
@@ -57,29 +66,34 @@ static inline int vti_prepare(struct vti *v)
         return vti_fail(v,VTI_LAYOUT);
     unsigned used[70]={0},taken_asid[256]={0},matches=0,free_slot=105;v->slot=105;v->bank=70;
     for(unsigned i=0;i<105;i++) {
+        v->scan_phase=2;v->scan_index=i;
         uint32_t smr,s2cr;
         if(!vti_rd(v,0x800+4*i,&smr) || !vti_rd(v,0xc00+4*i,&s2cr))return 0;
         if(!(smr&0x80000000u)) {if(free_slot==105)free_slot=i;continue;}
+        ++v->valid_routes;
         if(!(s2cr&0x30000) && (s2cr&255)<70)used[s2cr&255]=1;
         if(!((smr^0xb6u)&~((smr>>16)&0x7fffu)&0x7fffu)) {
-            if(smr!=0x800000b6u || ++matches>1)return vti_fail(v,VTI_BUSY);
+            v->conflict_smr=smr;v->conflict_s2cr=s2cr;
+            if(smr!=0x800000b6u || ++matches>1)return vti_busy(v,VTI_CONFLICT_SID_ALIAS);
             /* An enabled foreign translation can serve firmware outside this
              * Apps-EE DT mask. Without its owner we cannot redirect it.
              * Existing identity is reused by the native adapter; new mappings
              * here attach ONLY an unbound or already faulting exact SID. */
-            if(((s2cr>>16)&3)!=2)return vti_fail(v,VTI_BUSY);
+            if(((s2cr>>16)&3)!=2)return vti_busy(v,VTI_CONFLICT_FOREIGN_SID);
             v->slot=i;v->old_smr=smr;v->old_s2cr=s2cr;
         }
     }
     if(!matches) {
-        if(free_slot==105)return vti_fail(v,VTI_BUSY);
+        if(free_slot==105)return vti_busy(v,VTI_CONFLICT_NO_SLOT);
         v->slot=free_slot;
         if(!vti_rd(v,0x800+4*v->slot,&v->old_smr) || !vti_rd(v,0xc00+4*v->slot,&v->old_s2cr))return 0;
     }
     for(unsigned i=0;i<70;i++) {
+        v->scan_phase=3;v->scan_index=i;
         uint32_t control,actlr;uint64_t ttbr;
         if(!vti_rd(v,0x80000+4096*i,&control))return 0;
         if(control&1) {
+            ++v->enabled_banks;
             if(!vti_r64(v,0x80020+4096*i,&ttbr))return 0;
             unsigned asid=(unsigned)(ttbr>>48);if(asid<256)taken_asid[asid]=1;
             if(!vti_r64(v,0x80028+4096*i,&ttbr))return 0;
@@ -87,11 +101,19 @@ static inline int vti_prepare(struct vti *v)
         } else if(!used[i]) {
             if(!vti_rd(v,0x80004+4096*i,&actlr))return 0;
             if(!actlr)v->bank=i; /* only generic/reset ACTLR; no guessed Qualcomm quirks */
+            else {
+                if(!v->unsafe_actlr_banks){v->first_unsafe_bank=i;v->first_unsafe_actlr=actlr;}
+                ++v->unsafe_actlr_banks;
+            }
+        } else {
+            ++v->reserved_banks;
         }
     }
-    if(v->bank==70)return vti_fail(v,VTI_BUSY);
+    if(v->bank==70)return vti_busy(v,VTI_CONFLICT_NO_BANK);
+    v->scan_phase=4;
     for(v->asid=1;v->asid<256 && taken_asid[v->asid];v->asid++);
-    if(v->asid==256)return vti_fail(v,VTI_BUSY);
+    if(v->asid==256)return vti_busy(v,VTI_CONFLICT_NO_ASID);
+    v->scan_phase=5;
     ArmSmmu4KRange ranges[5];
     for(unsigned i=0;i<5;i++) {
         if((v->physical[i]&16383) || v->physical[i]<UINT64_C(0x8c0000000) ||
@@ -114,9 +136,10 @@ static inline int vti_prepare(struct vti *v)
     if(!vti_guard(v))return 0;
     uint32_t value;
     if(!vti_rd(v,0x800+4*v->slot,&value))return 0;
-    if(value!=v->old_smr)return vti_fail(v,VTI_BUSY);
+    if(value!=v->old_smr)return vti_busy(v,VTI_CONFLICT_SMR_CHANGED);
     if(!vti_rd(v,0xc00+4*v->slot,&value))return 0;
-    if(value!=v->old_s2cr)return vti_fail(v,VTI_BUSY);
+    if(value!=v->old_s2cr)return vti_busy(v,VTI_CONFLICT_S2CR_CHANGED);
+    v->scan_phase=6;
     /* Only SIDb6's exclusively leased slot is faulted, never another route. */
     if(!vti_wr(v,0xc00+4*v->slot,0x20000))return 0;
     if(!vti_rd(v,0xc00+4*v->slot,&value))return 0;
