@@ -199,6 +199,11 @@ them. Every WRITE10 is checked again against the first16GiB of userdata;
 partial4KiB writes preserve surrounding bytes. Cache synchronization is
 provided. Other profiles retain write rejection. Host tests cover descriptor
 upper words, capability/opt-in guards, malformed volume headers and partition/
-volume bounds. The integrated build and real-device startup remain unverified;
-the local root candidate is not yet flashed. Overwriting userdata and enabling
+volume bounds. The final integrated build39528953169 atbc671ba succeeded;
+boot image SHA256 is
+ff867146a703444e2e22f9ef8f00e019c6937ecd68c9af882fcd41245ee967bb.
+Local clang14 also accepts the integrated transport. The block device presents
+only the prepared16GiB volume so alternate HFS headers stay inside its bounds.
+Real-device integrated startup remains unverified; the local root candidate
+is not yet flashed. Overwriting userdata and enabling
 root writes require the user's concrete approval before execution.
