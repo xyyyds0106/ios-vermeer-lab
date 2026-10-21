@@ -131,11 +131,18 @@ if gui:
     (target / '0066-vermeer-frame-policy.patch').write_text(''.join(
         difflib.unified_diff([], data.splitlines(True), fromfile='/dev/null', tofile='b/' + path)))
     generated = ''
-    for name in ('vermeer_touch.c','vermeer_goodix_packet.h','vermeer_goodix_info.h','vermeer_geni_spi.h','vermeer_geni_dma.h','vermeer_touch_route.h','vermeer_touch_clock.h','vermeer_gpi.h','vermeer_restart_probe.c','vermeer_restart_control.h','vermeer_spmi_restart.h'):
+    for name in ('vermeer_touch.c','vermeer_goodix_packet.h','vermeer_goodix_info.h','vermeer_geni_spi.h','vermeer_geni_dma.h','vermeer_touch_route.h','vermeer_touch_clock.h','vermeer_gpi.h','vermeer_gpi_transport.h','vermeer_touch_iommu.h','vermeer_touch_gpi_native.h','vermeer_touch_power_if.h','vermeer_restart_probe.c','vermeer_restart_control.h','vermeer_spmi_restart.h'):
         data = (source.parent / 'vermeer' / name).read_text()
         path = 'bsd/dev/' + name
         generated += ''.join(difflib.unified_diff([], data.splitlines(True),
                                                 fromfile='/dev/null', tofile='b/' + path))
+    smmu = source.parent.parent / 'gpu' / 'ArmSmmu4K'
+    for src, name in (('ArmSmmu4K.h','ArmSmmu4K.h'),('ArmSmmu4KContext.h','ArmSmmu4KContext.h'),
+                      ('ArmSmmu4K.c','vermeer_touch_smmu_tables.c'),
+                      ('ArmSmmu4KContext.c','vermeer_touch_smmu_context.c')):
+        data = (smmu / src).read_text()
+        generated += ''.join(difflib.unified_diff([], data.splitlines(True),
+            fromfile='/dev/null', tofile='b/bsd/dev/' + name))
     generated += (source.parent / 'vermeer/0067-vermeer-touch-hook.patch').read_text()
     (target / '0067-vermeer-touch-hook.patch').write_text(generated)
     # Generic graphics fixes only; no Sweet touch, PMIC, SMP or UFS drivers.

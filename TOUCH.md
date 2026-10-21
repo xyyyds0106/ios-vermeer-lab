@@ -159,6 +159,65 @@ The new GPI snapshots and policy have local regression/ARM64 checks; another ful
 build/device test for this correction remains pending. GUI012 is retained as
 hardware evidence of preflight refusal, not a successful internal-DMA test.
 
+## Functional GPI transport candidate
+
+The functional candidate replaces the former "backend unavailable" return with
+the native `vermeer_touch_gpi_native.h` binding and production
+`vermeer_gpi_transport.h` execution core. It allocates six permanent, contiguous,
+individually verified16KB CPU pages: TX, RX, two64-element transfer rings, a
+256-element event ring, and one table extent. DT `ev-factor=2` means64 shifted
+left by2. The binding performs real PoC cache maintenance with barriers.
+
+Startup issues actual event/channel allocation and RX/TX start commands. It
+polls the required0-to-1 and1-to-2 hardware state changes, including when CPU
+interrupt delivery is masked. A status bit without the required transition
+does not complete a command. SPI transactions publish RX before TX doorbells,
+validate both EOT events against the exact last TRE pointers/channel/type/
+length/status, verify hardware ring consumption and serial idle, then invalidate
+RX and copy the whole result. Completion/ownership/time/cache errors retire the
+entire instance permanently. No partial RX, fabricated ACK, retry, reset or
+implicit ring/page/power release is performed. Command and transaction deadlines
+are checked after callbacks as well as bounded by poll counts.
+
+SIDb6 is a provider-wide stream. The native handoff checks Apps-EE's assigned
+static/dynamic mask0x1f for unallocated contexts without retained rings; it does
+not probe unassigned instances5..11 merely because max-num-gpii is12. An existing
+verified identity route is reused. Otherwise an unbound or exact faulting SID
+can receive a separately owned context and only five16KB mappings in its DT
+IOVA pool at0x100000. The production ArmSmmu4K builder/encoder supplies native
+4KB leaves, correct permissions, TTBRs, MAIR and TCR. A free disabled generic
+ACTLR bank and an ASID unused by either TTBR of enabled contexts are required.
+Only the selected SID slot/context is changed; no global reset or new bypass.
+Fault interrupt delivery remains disabled for this polling context; its actual
+FSR is checked before further GPI work. Uncertainty retains all resources.
+
+The current one-CPU GUI profile pins the configuration sequence against scheduler
+handoff. Multi-CPU attachment requires a shared SMMU configuration lock. An
+existing foreign translated SID, overlapping match, occupied peer, unsupported
+bank layout or missing free resources is refused rather than reassigned.
+
+The unchanged GT9916 identity, IC-info, full packet validation and HID code now
+calls the actual GPI exchange. Board power is provided through the static
+`vtp_ops` interface in `vermeer_touch_power_if.h`; the RPMh/reset implementation
+must call `vermeer_touch_power_register` before the touch worker acquires its
+lease. With no provider, inherited reset-high permits reuse; reset-low is a
+concrete stop condition, not a claim that AVDD/IOVDD are enabled. The transport
+does not fake regulator readiness or write unknown PMIC resources.
+
+`tests/run-touch-functional-tests.sh` runs both production cores under
+ASan/UBSan and checks freestanding AArch64. Tests exercise1..1032-byte transfers,
+both completion orders, ring wrap, stale/invalid command states, all transfer
+I/O/cache/lease/clock/phase failure boundaries and no-retry quarantine. Mapping
+tests inspect real generated leaf permissions, protect unrelated USB/UFS routes,
+refuse foreign translations and stop at every injected I/O failure. Kernel
+recipe compilation and actual ARM64 object inspection are separate checks.
+These fixtures do not prove physical DMA, cache coherence or input; native
+synchronous external MMIO aborts are not recovered by the callback tests.
+
+The GUI build registers two shared SMMU C objects (`vermeer_touch_smmu_tables.c`
+and `vermeer_touch_smmu_context.c`). GPU integration must reuse their exported
+ArmSmmu4K symbols instead of linking duplicate copies of the same sources.
+
 Protocol/register references (no binary firmware included):
 
 - [MiCode downstream GENI SPI](https://github.com/MiCode/Xiaomi_Kernel_OpenSource/blob/53ef33eacdc4f7ac737451e4cfc91963d59e3956/drivers/spi/spi-msm-geni.c),

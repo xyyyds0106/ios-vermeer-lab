@@ -15,7 +15,9 @@ with tempfile.TemporaryDirectory() as folder:
     for name in ('0046-','0050-','0058-','0059-','0060-','0061-','0062-','0063-','0064-','0065-','0066-','0067-','0068-'):
         assert any(p.name.startswith(name) for p in profile.iterdir())
     assert '+++ b/bsd/dev/vermeer_touch.c' in all_patches
-    for name in ('vermeer_geni_dma.h','vermeer_touch_route.h','vermeer_gpi.h','vermeer_restart_probe.c',
+    for name in ('vermeer_geni_dma.h','vermeer_touch_route.h','vermeer_gpi.h','vermeer_gpi_transport.h',
+                 'vermeer_touch_iommu.h','vermeer_touch_gpi_native.h','vermeer_touch_power_if.h',
+                 'vermeer_touch_smmu_tables.c','vermeer_touch_smmu_context.c','vermeer_restart_probe.c',
                  'vermeer_restart_control.h','vermeer_spmi_restart.h'):
         assert '+++ b/bsd/dev/'+name in all_patches
     assert '+++ b/bsd/dev/sweet_touch.c' not in all_patches

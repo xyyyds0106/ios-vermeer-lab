@@ -1,0 +1,209 @@
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "../xnu/vermeer/vermeer_gpi_transport.h"
+enum {HEALTHY,NO_COMMAND_IRQ,NO_EVENTS,ERROR_EVENT,SHORT_EVENT,WRONG_POINTER,
+      DUPLICATE_EVENT,WRONG_CHANNEL,WRONG_TYPE,ACTIVE_SERIAL,REVOKE_TX_DB,SLOW_CALLBACK,
+      IO_FAILURE,CACHE_FAILURE,REVERSE_EVENTS,LEASE_BOUNDARY,BACKWARD_TIME,PHASE_CHANGE,
+      CACHE_REVOKE,WAIT_FAIL,BAD_PRODUCER,BAD_CHANNEL_RP,SLOW_COMMAND,NO_COMMAND_CHANGE,WRONG_COMMAND_STATE};
+struct fixture {
+    struct vgpt g;uint32_t reg[0x14000/4];uint64_t now;
+    unsigned mode,reads,writes,cache_count,fail_at,callbacks,ev_prod,rx_doorbell,revoked;
+    unsigned clean[5],invalid[5],transfers;
+};
+static unsigned page_for(struct fixture *f,void *cpu)
+{for(unsigned i=0;i<5;i++)if(f->g.page[i].cpu==cpu)return i;assert(0);return 0;}
+static int lease(void *ctx)
+{
+    struct fixture *f=ctx;
+    if(f->revoked || (f->mode==LEASE_BOUNDARY && f->callbacks>=f->fail_at))return 0;
+    if(f->mode==REVOKE_TX_DB && f->transfers)return 0;
+    return 1;
+}
+static int time_us(void *ctx,uint64_t *value)
+{struct fixture *f=ctx;*value=f->mode==BACKWARD_TIME && f->callbacks>=f->fail_at?f->now-1:f->now;return 1;}
+static int fail(struct fixture *f)
+{
+    ++f->callbacks;
+    if(f->mode==PHASE_CHANGE && f->callbacks==f->fail_at)f->g.phase=VGPT_READY;
+    if(f->mode==SLOW_COMMAND)f->now+=250000;
+    if(f->mode==SLOW_CALLBACK && f->transfers)f->now+=100000;
+    return f->mode==IO_FAILURE && f->callbacks==f->fail_at;
+}
+static int rd(void *ctx,unsigned off,uint32_t *value)
+{
+    struct fixture *f=ctx;assert(!(off&3) && off<sizeof(f->reg));++f->reads;
+    if(fail(f))return 0;
+    *value=f->reg[off/4];return 1;
+}
+static void pointer(struct fixture *f,unsigned reg,uint64_t value)
+{f->reg[reg/4]=(uint32_t)value;f->reg[(reg+4)/4]=(uint32_t)(value>>32);}
+static void emit(struct fixture *f,unsigned ch,unsigned index,unsigned bytes)
+{
+    struct vgp_tre *events=f->g.page[VGPT_ER].cpu;
+    uint64_t ptr=f->g.page[ch?VGPT_RR:VGPT_TR].iova+16*index;
+    struct vgp_tre e={{(uint32_t)ptr,(uint32_t)(ptr>>32),(2u<<24)|bytes,(ch<<24)|(0x22u<<16)}};
+    if(f->mode==ERROR_EVENT)e.word[2]=(16u<<24)|bytes;
+    if(f->mode==SHORT_EVENT)e.word[2]--;
+    if(f->mode==WRONG_POINTER)e.word[0]+=16;
+    if(f->mode==WRONG_CHANNEL)e.word[3]|=2u<<24;
+    if(f->mode==WRONG_TYPE)e.word[3]^=1u<<16;
+    events[f->ev_prod]=e;f->ev_prod=(f->ev_prod+1)&255;
+}
+static void execute(struct fixture *f,uint32_t tx_db)
+{
+    struct vgpt *g=&f->g;
+    unsigned tw=(tx_db-(uint32_t)g->page[VGPT_TR].iova)/16;
+    unsigned old=(tw+64-3)&63,rx=(g->rx_wp+63)&63;
+    struct vgp_tre *ring=g->page[VGPT_TR].cpu,*rr=g->page[VGPT_RR].cpu;
+    const struct vgp_tre *cfg=&ring[old],*go=&ring[(old+1)&63],*dma=&ring[(old+2)&63];
+    unsigned bytes=dma->word[2];assert(bytes && bytes<=1032 && tw<64);
+    assert(cfg->word[0]==0x03000004 && cfg->word[2]==128 && cfg->word[3]==0x220001);
+    assert(go->word[0]==3 && go->word[2]==bytes && go->word[3]==0x200801);
+    assert(dma->word[3]==0x100200 && rr[rx].word[3]==0x100000 && rr[rx].word[2]==bytes);
+    assert(f->clean[VGPT_TX] && f->clean[VGPT_TR] && f->clean[VGPT_RR] && f->clean[VGPT_RX]);
+    assert(f->rx_doorbell==1);f->rx_doorbell=0;++f->transfers;
+    if(f->mode==NO_EVENTS || f->mode==WAIT_FAIL)return;
+    for(unsigned i=0;i<bytes;i++)((uint8_t *)g->page[VGPT_RX].cpu)[i]=((uint8_t *)g->page[VGPT_TX].cpu)[i]^0x5a;
+    if(f->mode==REVERSE_EVENTS){emit(f,1,rx,bytes);emit(f,0,(old+2)&63,bytes);}
+    else {emit(f,0,(old+2)&63,bytes);emit(f,f->mode==DUPLICATE_EVENT?0:1,f->mode==DUPLICATE_EVENT?(old+2)&63:rx,bytes);}
+    pointer(f,0x10010,g->page[VGPT_TR].iova+tw*16);
+    pointer(f,0x10090,g->page[VGPT_RR].iova+g->rx_wp*16);
+    pointer(f,0x11010,g->page[VGPT_ER].iova+f->ev_prod*16);
+    if(f->mode==BAD_PRODUCER)pointer(f,0x11010,g->page[VGPT_ER].iova+4096);
+    if(f->mode==BAD_CHANNEL_RP)pointer(f,0x10010,g->page[VGPT_TR].iova+16*((tw+1)&63));
+}
+static int wr(void *ctx,unsigned off,uint32_t value)
+{
+    struct fixture *f=ctx;assert(!(off&3) && off<sizeof(f->reg));++f->writes;
+    if(fail(f))return 0;
+    if(off==0x130a0)f->reg[0x13090/4]&=~value;
+    else if(off==0x130a4)f->reg[0x13094/4]&=~value;
+    else if(off==0x13008 || off==0x13010) {
+        unsigned ev=off==0x13010,ch=value&255,op=value>>24;
+        assert(ch<2 && op<2);
+        unsigned base=ev?0x11000:0x10000+0x80*ch;
+        if(f->mode!=NO_COMMAND_CHANGE)f->reg[base/4]=(f->mode==WRONG_COMMAND_STATE?15u:op?2u:1u)<<20;
+        if(f->mode!=NO_COMMAND_IRQ)f->reg[(ev?0x13094:0x13090)/4]|=1u<<(ev?0:ch);
+        if(op)pointer(f,base+0x10,((uint64_t)f->reg[(base+12)/4]<<32)|f->reg[(base+8)/4]);
+    } else {
+        if(off==0x10000 || off==0x10080 || off==0x11000)value|=1u<<20; /* RO state */
+        f->reg[off/4]=value;
+        if(off==0x1100c)pointer(f,0x11010,((uint64_t)value<<32)|f->reg[0x11008/4]);
+        if(off==0x12008)++f->rx_doorbell;
+        if(off==0x12000)execute(f,value);
+    }
+    return 1;
+}
+static int cache(void *ctx,void *cpu,size_t n,unsigned op)
+{
+    struct fixture *f=ctx;assert(n==16384 && op<=2);unsigned p=page_for(f,cpu);
+    ++f->cache_count;
+    if(f->mode==CACHE_REVOKE && f->cache_count==f->fail_at)f->revoked=1;
+    if(f->mode==CACHE_FAILURE && f->cache_count==f->fail_at)return 0;
+    if(op==VGPT_CLEAN || op==VGPT_CLEAN_INVALIDATE)++f->clean[p];
+    if(op==VGPT_INVALIDATE)++f->invalid[p];
+    return 1;
+}
+static int pause_us(void *ctx,unsigned us)
+{struct fixture *f=ctx;assert(us==20);f->now+=us;return f->mode!=WAIT_FAIL;}
+static int idle(void *ctx)
+{return ((struct fixture *)ctx)->mode!=ACTIVE_SERIAL;}
+static struct fixture *make(unsigned mode)
+{
+    struct fixture *f=calloc(1,sizeof(*f));assert(f);f->mode=mode;f->now=1000;
+    f->g.io=(struct vgpt_ops){f,lease,rd,wr,cache,time_us,pause_us,idle};
+    for(unsigned i=0;i<5;i++) {
+        f->g.page[i].cpu=aligned_alloc(16384,16384);assert(f->g.page[i].cpu);
+        f->g.page[i].iova=UINT64_C(0x8c1000000)+i*16384;
+    }
+    return f;
+}
+static void destroy(struct fixture *f)
+{for(unsigned i=0;i<5;i++)free(f->g.page[i].cpu);free(f);}
+static void healthy(void)
+{
+    uint8_t tx[1032],rx[1032];for(unsigned i=0;i<1032;i++)tx[i]=(uint8_t)i;
+    const unsigned modes[]={HEALTHY,REVERSE_EVENTS,NO_COMMAND_IRQ};
+    for(unsigned m=0;m<sizeof(modes)/sizeof(modes[0]);m++) {
+        struct fixture *f=make(modes[m]);assert(vgpt_start(&f->g));assert(f->g.commands==5);
+        assert(f->reg[0x11004/4]==4096 && f->reg[0x10004/4]==1024);
+        for(unsigned n=1;n<=1032;n++) {
+            memset(rx,0xcc,sizeof(rx));assert(vgpt_exchange(&f->g,tx,rx,n,0,128));
+            for(unsigned i=0;i<n;i++)assert(rx[i]==(uint8_t)(tx[i]^0x5a));
+            for(unsigned i=n;i<1032;i++)assert(rx[i]==0xcc);
+        }
+        assert(!f->g.quarantined && f->g.events==2064 && f->invalid[VGPT_RX]==1032);
+        destroy(f);
+    }
+}
+static void faults(void)
+{
+    uint8_t tx[8]={0},rx[8];
+    const unsigned modes[]={NO_EVENTS,ERROR_EVENT,SHORT_EVENT,WRONG_POINTER,DUPLICATE_EVENT,
+        WRONG_CHANNEL,WRONG_TYPE,ACTIVE_SERIAL,REVOKE_TX_DB,SLOW_CALLBACK,WAIT_FAIL,BAD_PRODUCER,BAD_CHANNEL_RP};
+    for(unsigned i=0;i<sizeof(modes)/sizeof(modes[0]);i++) {
+        struct fixture *f=make(modes[i]);assert(vgpt_start(&f->g));memset(rx,0xcc,sizeof(rx));
+        assert(!vgpt_exchange(&f->g,tx,rx,8,0,128) && f->g.quarantined);
+        for(unsigned j=0;j<8;j++)assert(rx[j]==0xcc);
+        unsigned writes=f->writes,reads=f->reads;
+        assert(!vgpt_exchange(&f->g,tx,rx,8,0,128) && !vgpt_start(&f->g));
+        assert(writes==f->writes && reads==f->reads);destroy(f);
+    }
+    struct fixture *reference=make(HEALTHY);assert(vgpt_start(&reference->g));
+    unsigned callbacks=reference->callbacks;destroy(reference);
+    for(unsigned i=1;i<=callbacks;i++) {
+        struct fixture *f=make(IO_FAILURE);f->fail_at=i;
+        assert(!vgpt_start(&f->g) && f->g.quarantined && f->callbacks==i);destroy(f);
+    }
+    for(unsigned i=1;i<=5;i++) {
+        struct fixture *f=make(CACHE_FAILURE);f->fail_at=i;
+        assert(!vgpt_start(&f->g) && f->g.quarantined && !f->writes);destroy(f);
+    }
+    struct fixture *f=make(HEALTHY);f->reg[0x10000/4]=2u<<20;
+    assert(!vgpt_start(&f->g) && !f->writes);destroy(f);
+    f=make(HEALTHY);f->g.page[1].iova=f->g.page[0].iova;
+    assert(!vgpt_start(&f->g) && !f->reads && !f->writes);destroy(f);
+    for(unsigned mode=NO_COMMAND_CHANGE;mode<=WRONG_COMMAND_STATE;mode++) {
+        f=make(mode);assert(!vgpt_start(&f->g) && f->g.quarantined);
+        assert(f->g.error==(mode==NO_COMMAND_CHANGE?VGPT_TIMEOUT:VGPT_STATE));destroy(f);
+    }
+    for(unsigned c=0;c<3;c++)for(unsigned state=1;state<16;state++) {
+        f=make(HEALTHY);f->reg[(c==2?0x11000:0x10000+0x80*c)/4]=state<<20;
+        assert(!vgpt_start(&f->g) && !f->writes);destroy(f);
+    }
+    f=make(HEALTHY);assert(vgpt_start(&f->g));f->mode=SLOW_COMMAND;
+    /* Direct command helper must stop after a single callback crosses its
+     * 250ms deadline, even though the 1.5s startup budget has time remaining. */
+    f->g.phase=f->g.active_phase=VGPT_STARTING;f->g.begin=f->g.last=f->now;f->g.budget=1500000;
+    unsigned before=f->callbacks;assert(!vgpt_command(&f->g,0,0,1));
+    assert(f->g.error==VGPT_TIMEOUT && f->callbacks==before+1);destroy(f);
+}
+static void transfer_boundaries(void)
+{
+    uint8_t tx[8]={0},rx[8];
+    struct fixture *f=make(HEALTHY);assert(vgpt_start(&f->g));f->callbacks=f->cache_count=0;
+    assert(vgpt_exchange(&f->g,tx,rx,8,0,128));unsigned calls=f->callbacks,caches=f->cache_count;destroy(f);
+    const unsigned faults[]={IO_FAILURE,LEASE_BOUNDARY,BACKWARD_TIME,PHASE_CHANGE};
+    for(unsigned m=0;m<sizeof(faults)/sizeof(faults[0]);m++)for(unsigned i=1;i<=calls;i++) {
+        f=make(HEALTHY);assert(vgpt_start(&f->g));f->callbacks=0;f->mode=faults[m];f->fail_at=i;
+        memset(rx,0xcc,sizeof(rx));assert(!vgpt_exchange(&f->g,tx,rx,8,0,128) && f->g.quarantined);
+        assert(f->callbacks==i);for(unsigned j=0;j<8;j++)assert(rx[j]==0xcc);
+        unsigned reads=f->reads,writes=f->writes;
+        assert(!vgpt_exchange(&f->g,tx,rx,8,0,128));assert(f->reads==reads && f->writes==writes);destroy(f);
+    }
+    for(unsigned mode=CACHE_FAILURE;mode<=CACHE_REVOKE;mode+=CACHE_REVOKE-CACHE_FAILURE)
+    for(unsigned i=1;i<=caches;i++) {
+        f=make(HEALTHY);assert(vgpt_start(&f->g));f->cache_count=0;f->mode=mode;f->fail_at=i;
+        memset(rx,0xcc,sizeof(rx));assert(!vgpt_exchange(&f->g,tx,rx,8,0,128) && f->g.quarantined);
+        assert(f->cache_count==i);for(unsigned j=0;j<8;j++)assert(rx[j]==0xcc);destroy(f);
+    }
+    f=make(HEALTHY);assert(vgpt_start(&f->g));unsigned reads=f->reads,writes=f->writes;
+    assert(!vgpt_exchange(&f->g,f->g.page[VGPT_ER].cpu,rx,8,0,128));
+    assert(!vgpt_exchange(&f->g,tx,f->g.page[VGPT_RX].cpu,8,0,128));
+    assert(!vgpt_exchange(&f->g,tx,(void *)&f->g,8,0,128));
+    assert(f->reads==reads && f->writes==writes && !f->g.quarantined);destroy(f);
+}
+int main(void)
+{healthy();faults();transfer_boundaries();puts("GPI transport: real command/doorbell lifecycle, ring wrap, both validated completions, every transfer IO/cache/lease/clock/phase boundary and permanent quarantine PASS");}

@@ -1,13 +1,14 @@
 /* Experimental K70 GT9916 / GENI SPI SE4 physical input.
  * Only --ios-gui + vermeer_touch=1 + exact physical-model can enter here.
- * Fixed DT/official MiCode clock and pin contract; no PMIC/reset writes,
- * firmware/config upload, storage access or arbitrary debug MMIO command.
- * Reuses controller firmware/power left by ABL; absent identity stops safely.
+ * Fixed DT/official MiCode GPI, clock and pin contract. Actual board power
+ * sequencing belongs to the registered RPMh/reset provider. No firmware/config
+ * upload, storage access or arbitrary debug MMIO command. Identity gates HID.
  */
 #if defined(ARM64_BOARD_CONFIG_SWEET)
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <kern/clock.h>
+#include <kern/cpu_data.h>
 #include <kern/thread.h>
 #include <kern/sched_prim.h>
 #include <mach/thread_act.h>
@@ -15,12 +16,18 @@
 #include <machine/atomic.h>
 #include <pexpert/pexpert.h>
 #include <pexpert/device_tree.h>
+#include <vm/pmap.h>
+#include <vm/vm_kern.h>
 #include "vermeer_geni_spi.h"
 #include "vermeer_touch_route.h"
 #include "vermeer_goodix_info.h"
 #include "vermeer_touch_clock.h"
 #include "vermeer_gpi.h"
+#include "vermeer_gpi_transport.h"
+#include "vermeer_touch_iommu.h"
+#include "vermeer_touch_power_if.h"
 extern vm_offset_t ml_io_map(vm_offset_t,vm_size_t);
+extern ppnum_t pmap_find_phys(pmap_t,addr64_t);
 extern void sweet_hid_touch(int,int,int,int);
 extern int sweet_hid_touch_ready(void);
 extern void vermeer_debug_input_register(void (*)(void));
@@ -42,6 +49,13 @@ static struct {
     vm_offset_t se,gcc,gpio,smmu,gpi;
     uint32_t vote_added,pins[4],saved[VT_NREGS];
     bool pins_saved,engine_saved,root_forced,fifo_owned,gpi_probe;
+    bool use_gpi,power_held,gpi_claimed,identity_mapping;
+    vm_offset_t dma_va;uint64_t dma_pa;
+    struct vgpt transport;struct vti iommu;struct vtr_route identity_route;
+    const struct vtp_ops *power;
+    unsigned _Atomic gpi_phase,gpi_error,gpi_events,gpi_commands,gpi_retired,iommu_error;
+    unsigned _Atomic iommu_mode,iommu_bank,iommu_slot,iommu_fsr;
+    unsigned _Atomic gpi_last_channel,gpi_last_code,gpi_last_status,gpi_last_length;
     struct vgp_snapshot gpi_snapshot;
     unsigned _Atomic gpi_sample_ready;
     struct vg_bus bus;
@@ -60,7 +74,8 @@ static struct {
     uint32_t _Atomic gpi_reason,gpi_matches,gpi_slot,gpi_smr,gpi_s2cr,gpi_cbar,gpi_sctlr;
     uint32_t _Atomic inherited_dma_mode,inherited_tx_in,inherited_rx_in;
     uint8_t tx[1032],rx[1032];
-} touch={.route_reason=VTR_UNSAMPLED,.gpi_reason=VTR_UNSAMPLED};
+} touch={.route_reason=VTR_UNSAMPLED,.gpi_reason=VTR_UNSAMPLED,
+    .iommu_bank=UINT32_MAX,.iommu_slot=UINT32_MAX};
 enum { VT_WAIT=1,VT_CLOCK,VT_FIRMWARE,VT_IDENTITY,VT_READY,VT_STOPPED };
 static uint32_t vt_rd(vm_offset_t base,unsigned reg)
 {
@@ -114,6 +129,15 @@ static void vt_status(void)
         os_atomic_load(&touch.gpi_reason,relaxed),os_atomic_load(&touch.gpi_matches,relaxed),
         os_atomic_load(&touch.gpi_slot,relaxed),os_atomic_load(&touch.gpi_smr,relaxed),
         os_atomic_load(&touch.gpi_s2cr,relaxed),os_atomic_load(&touch.gpi_cbar,relaxed),os_atomic_load(&touch.gpi_sctlr,relaxed));
+    printf("VERMEER GPI: transport phase=%u error=%u events=%u commands=%u retained=%u iommu-error=%u\n",
+        os_atomic_load(&touch.gpi_phase,relaxed),os_atomic_load(&touch.gpi_error,relaxed),
+        os_atomic_load(&touch.gpi_events,relaxed),os_atomic_load(&touch.gpi_commands,relaxed),
+        os_atomic_load(&touch.gpi_retired,relaxed),os_atomic_load(&touch.iommu_error,relaxed));
+    printf("VERMEER GPI: iommu mode=%u bank=%u slot=%u fsr=%08x last-ch=%u code=%u status=%04x length=%u\n",
+        os_atomic_load(&touch.iommu_mode,relaxed),os_atomic_load(&touch.iommu_bank,relaxed),
+        os_atomic_load(&touch.iommu_slot,relaxed),os_atomic_load(&touch.iommu_fsr,relaxed),
+        os_atomic_load(&touch.gpi_last_channel,relaxed),os_atomic_load(&touch.gpi_last_code,relaxed),
+        os_atomic_load(&touch.gpi_last_status,relaxed),os_atomic_load(&touch.gpi_last_length,relaxed));
     if(os_atomic_load(&touch.gpi_sample_ready,acquire)) {
         const struct vgp_snapshot *s=&touch.gpi_snapshot;
         printf("VERMEER GPI: snapshot reason=%u valid=%08x changed=%08x provider=00a00000 instance=0 ee-offset=00010000\n",
@@ -179,9 +203,12 @@ static void vt_gpi_provider_snapshot(void)
     /* Immutable after this release; USB reads only the retained snapshot. */
     os_atomic_store(&touch.gpi_sample_ready,1,release);
 }
+#include "vermeer_touch_gpi_native.h"
 static int vt_transfer(unsigned n)
 {
-    int ok=vg_transfer(&touch.bus,touch.tx,touch.rx,n);
+    int ok=touch.use_gpi?vgpt_exchange(&touch.transport,touch.tx,touch.rx,n,
+        vt_rd(touch.se,0x7c)&7u,128):vg_transfer(&touch.bus,touch.tx,touch.rx,n);
+    if(touch.use_gpi)vtg_status();
     os_atomic_store(&touch.spi_phase,touch.bus.phase,relaxed);os_atomic_store(&touch.spi_irq,touch.bus.last_irq,relaxed);
     os_atomic_store(&touch.spi_status,touch.bus.last_status,relaxed);
     return ok;
@@ -272,9 +299,7 @@ static int vt_engine_setup(void)
          * K70 DT maps its provider a00000 via SIDb6; SIDa3 is wrapper DMA.
          * Observe both routes; never substitute internal DMA or add bypass. */
         (void)vt_route_ready();vt_gpi_route_snapshot();vt_gpi_provider_snapshot();
-        printf("VERMEER TOUCH: power readiness=unknown; RPMh rail ownership unavailable; reset not released\n");
-        printf("VERMEER TOUCH: GPI required by K70 vendor contract; internal DMA forbidden, GPI backend unavailable\n");
-        return 0;
+        return vtg_prepare();
     }
     if(transport!=VTR_TRANSPORT_FIFO) {printf("VERMEER TOUCH: inherited DMA/GPI state not owned; FIFO refused\n");return 0;}
     /* Establish ownership from the complete baseline before allowing clock
@@ -319,6 +344,9 @@ static int vt_engine_setup(void)
 }
 static void vt_restore(void)
 {
+    if(touch.gpi_claimed) {
+        vtg_status();printf("VERMEER TOUCH: GPI rings/pages/SID/power lease retained until reboot; no implicit teardown\n");return;
+    }
     /* If abort did not quiesce, leave clocks/registers retained until reboot.
      * Disabling an active engine could turn a recoverable error into a fault.
      */
@@ -363,7 +391,7 @@ static void vt_thread(void *arg,wait_result_t result)
     os_atomic_store(&touch.stage,VT_IDENTITY,relaxed);
     if(!vt_identify())goto stopped;
     os_atomic_store(&touch.stage,VT_READY,relaxed);
-    printf("VERMEER TOUCH: physical GT9916 input ready (SPI FIFO, no firmware upload)\n");
+    printf("VERMEER TOUCH: physical GT9916 input ready (%s, no firmware upload)\n",touch.use_gpi?"GPI SPI":"SPI FIFO");
     unsigned consecutive_bad=0;
     for(;;) {
         uint8_t packet[90];

@@ -1,11 +1,13 @@
 --- a/bsd/conf/files
 +++ b/bsd/conf/files
-@@ -108,6 +108,8 @@
+@@ -108,6 +108,10 @@
  bsd/dev/vermeer_debug.c			standard
  bsd/dev/vermeer_usb_debug.c		standard
  bsd/dev/sweet_sample.c			standard
 +bsd/dev/vermeer_touch.c			standard
 +bsd/dev/vermeer_restart_probe.c		standard
++bsd/dev/vermeer_touch_smmu_tables.c	standard
++bsd/dev/vermeer_touch_smmu_context.c	standard
  bsd/dev/memdev.c			standard
  bsd/dev/mem.c				standard
  bsd/dev/munge.c 			optional config_requires_u32_munging
