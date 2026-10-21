@@ -11,8 +11,8 @@ and the original source and dependency licensing applies.
 Confirmed on one K70 through custom temporary probes: linear framebuffer
 output, EL1 execution, 19.2 MHz counter, 16KB MMU and caches, virtual timer IRQs,
 and sparse access to the selected 256MB RAM window. XNU now boots a source-built
-PID1 from a journaled HFSX RAM root and independently verifies UFS reads against
-Android's CRC baseline. Secondary cores, a filesystem root on UFS, Apple
+PID1 from a journaled HFSX RAM root and independently verifies raw and VFS block
+UFS reads against Android's CRC baseline. Secondary cores, a filesystem root on UFS, Apple
 userspace and an iOS interface remain unverified. The following entries record
 the individual milestones, including failures that have since been resolved.
 
@@ -152,11 +152,17 @@ this change are pending.
 
 The sector-size fix now compiles successfully: Actions39451667461 at3c98f69,
 kernelSHA92111656b82eda7e1be4cd6f629c57bc7bb27f72e17ba5670bd1d4543d6e83f8.
-Image006 has been packaged and checked offline (SHA256
-0103319abed9222965605294b7022047237b0c19471b0f3f154df1a5ce0b5459), retaining
-the diagnostic source PID1 and proven HFSX RAM root. It has NOT been booted.
+Image006 (SHA256
+0103319abed9222965605294b7022047237b0c19471b0f3f154df1a5ce0b5459) is now
+hardware-verified by a photograph on2026-10-21: all four raw-path checks plus
+`VFS block-device read CRC matches Android: PASS`, with continuing PID1
+heartbeats. The d_psize correction fixes the observed EINVAL. Preserve006 as
+the current regression image. Root remains the diagnostic HFSX RAM disk;
+this does not yet prove a filesystem mount on UFS or Apple userspace.
 
 At the user's request on2026-10-20, continue COMPUTER-ONLY preparation overnight.
-Do not run adb/fastboot, reboot, boot, flash or otherwise operate the phone until
-the user resumes real-device testing tomorrow. Preserve the confirmed003 image,
-stock backups and failed-test evidence. No Apple userspace/iOS GUI is verified.
+The user resumed real-device testing on2026-10-21, allowing the temporary006
+test above. Preserve the confirmed003/006 images, stock backups and failed-test
+evidence. Destructive storage operations still need concrete per-step approval.
+An official16.7.16/20H392 root candidate is prepared and checked offline; it has
+not been flashed or booted. No Apple userspace/iOS GUI is verified on this K70.
