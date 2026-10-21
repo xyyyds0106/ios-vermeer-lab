@@ -29,9 +29,9 @@ typedef enum {
 } AdrenoHfiStartupStatus;
 typedef struct {
     void *cookie;
-    int (*now_us)(void *,uint64_t *);
+    int (*now_us)(void *,uint64_t *); /* read-only current monotonic time */
     int (*wait_us)(void *,unsigned);
-    int (*check_health)(void *); /* real platform fault/ownership checks */
+    int (*check_health)(void *); /* read-only real platform fault/ownership checks */
     unsigned polls_per_command,wait_interval_us;
     uint64_t command_timeout_us,total_timeout_us;
 } AdrenoHfiStartupServices;
@@ -61,7 +61,11 @@ AdrenoHfiStartupStatus AdrenoHfiStartupEncode(const AdrenoHfiStartupConfig *,
  * a real ready GMU, exclusive coherent HFI allocation and active native4K GMU
  * mappings. Only matching actual ACKs advance the startup sequence. All
  * commands and the whole sequence have monotonic-time AND iteration bounds.
- * Callback operations must themselves be bounded. On any attempted-sequence
+ * Callback operations must themselves be bounded and must not re-enter this
+ * API or mutate protocol state. Health must check a live exclusive platform
+ * lease retained through each transport operation, not a cached approval.
+ * Time and live phase are checked after callbacks and before final success.
+ * On any attempted-sequence
  * failure the transport is poisoned; no replay, synthetic ACK or implicit
  * stop occurs. Even success does not authorize resource release or prove GPU
  * execution, power/coherence/SMMU readiness, shader submission or a desktop.

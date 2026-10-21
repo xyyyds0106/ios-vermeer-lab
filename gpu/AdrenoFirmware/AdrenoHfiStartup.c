@@ -106,6 +106,21 @@ static AdrenoHfiStartupStatus clock_check(const AdrenoHfiStartupServices *s,
     if(now-begin>=s->total_timeout_us || now-command>=s->command_timeout_us)return AdrenoHfiStartupTimeout;
     return AdrenoHfiStartupSuccess;
 }
+static int live(const AdrenoHfiStartup *state,const AdrenoHfi *h)
+{return state->attempted==1 && !state->poisoned && !state->completed && !h->poisoned;}
+static AdrenoHfiStartupStatus guarded(const AdrenoHfiStartupServices *s,
+    const AdrenoHfiStartup *state,const AdrenoHfi *h,
+    uint64_t begin,uint64_t command,uint64_t *last,AdrenoHfiStartupResult *r)
+{
+    AdrenoHfiStartupStatus status=clock_check(s,begin,command,last,r);
+    if(status)return status;
+    if(!live(state,h) || s->check_health(s->cookie))return AdrenoHfiStartupPlatformFault;
+    /* A successful health callback may itself consume the remaining budget.
+     * Re-sample time and phase before any subsequent queue access/success. */
+    status=clock_check(s,begin,command,last,r);
+    if(status)return status;
+    return live(state,h)?AdrenoHfiStartupSuccess:AdrenoHfiStartupPlatformFault;
+}
 AdrenoHfiStartupStatus AdrenoHfiStartupRun(AdrenoHfiStartup *state,AdrenoHfi *h,
     const AdrenoHfiStartupConfig *c,const AdrenoHfiStartupServices *s,AdrenoHfiStartupResult *r)
 {
@@ -118,40 +133,41 @@ AdrenoHfiStartupStatus AdrenoHfiStartupRun(AdrenoHfiStartup *state,AdrenoHfi *h,
     uint64_t begin,last,command;
     if(s->now_us(s->cookie,&begin))return AdrenoHfiStartupClockError;
     last=begin;
-    if(s->check_health(s->cookie))return AdrenoHfiStartupPlatformFault;
     state->attempted=1;
-    AdrenoHfiStartupStatus status=AdrenoHfiStartupSuccess;
+    AdrenoHfiStartupStatus status=guarded(s,state,h,begin,begin,&last,r);
+    if(status)goto failed;
     uint32_t payload[159],output[16],id;size_t words,returned;
     for(unsigned step=AdrenoHfiStagePerformance;step<=AdrenoHfiStageStart;++step) {
         if((step==AdrenoHfiStageAcdEnable || step==AdrenoHfiStageAcdTable) && !c->acd_enable_mask)continue;
         if(step==AdrenoHfiStageIfpc && !c->enable_ifpc)continue;
         r->stage=(AdrenoHfiStartupStage)step;command=last;
-        status=clock_check(s,begin,command,&last,r);if(status)goto failed;
-        if(s->check_health(s->cookie)) {status=AdrenoHfiStartupPlatformFault;goto failed;}
+        status=guarded(s,state,h,begin,command,&last,r);if(status)goto failed;
         status=AdrenoHfiStartupEncode(c,r->stage,&id,payload,159,&words);if(status)goto failed;
         r->wire_header=0;
         r->transport_status=AdrenoHfiSend(h,id,payload,words,&r->wire_header);
         if(r->wire_header)++r->published_commands;
         if(r->transport_status!=AdrenoHfiSuccess) {status=AdrenoHfiStartupTransportError;goto failed;}
+        status=guarded(s,state,h,begin,command,&last,r);if(status)goto failed;
         unsigned acknowledged=0;
         for(unsigned i=0;i<s->polls_per_command;++i) {
-            status=clock_check(s,begin,command,&last,r);if(status)goto failed;
-            if(s->check_health(s->cookie)) {status=AdrenoHfiStartupPlatformFault;goto failed;}
+            status=guarded(s,state,h,begin,command,&last,r);if(status)goto failed;
             ++r->poll_reads;
             r->transport_status=AdrenoHfiPoll(h,output,16,&returned,&r->firmware_error);
             if(r->transport_status==AdrenoHfiSuccess) {
-                status=clock_check(s,begin,command,&last,r);if(status)goto failed;
-                if(s->check_health(s->cookie)) {status=AdrenoHfiStartupPlatformFault;goto failed;}
+                status=guarded(s,state,h,begin,command,&last,r);if(status)goto failed;
                 r->acknowledged_stages|=1u<<step;acknowledged=1;break;
             }
             if(r->transport_status!=AdrenoHfiEmpty) {status=AdrenoHfiStartupTransportError;goto failed;}
+            status=guarded(s,state,h,begin,command,&last,r);if(status)goto failed;
             if(i+1<s->polls_per_command && s->wait_us(s->cookie,s->wait_interval_us)) {
                 status=AdrenoHfiStartupWaitError;goto failed;
             }
+            status=guarded(s,state,h,begin,command,&last,r);if(status)goto failed;
         }
         if(!acknowledged) {status=AdrenoHfiStartupTimeout;goto failed;}
     }
+    status=guarded(s,state,h,begin,command,&last,r);if(status)goto failed;
     state->completed=1;r->stage=AdrenoHfiStageComplete;return AdrenoHfiStartupSuccess;
 failed:
-    state->poisoned=1;h->poisoned=1;return status;
+    state->completed=0;state->poisoned=1;h->poisoned=1;return status;
 }

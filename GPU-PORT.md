@@ -120,6 +120,16 @@ IOAccelerator/Metal ABI and scanout integration remain unfinished. Current
 images still render through CPU copies. No new GPU-enabled boot image is
 produced by these tests.
 
+The local HFI startup port checks monotonic command/total deadlines after health,
+notify and wait callbacks, revalidates the live attempted phase/transport state,
+and checks again before recording ACK progress or overall success. A callback
+that consumes the remaining budget cannot publish the next command or turn an
+expired final ACK into success. Failure poisons the single attempt and retains
+resources. Host ASan/UBSan regression uses production startup code with an
+injected transport boundary to cover slow health/notify/wait, final-deadline
+expiry, backwards time, revoked health and changed phase. These tests exercise
+startup control flow; they do not execute the ARM queue barriers or a real GMU.
+
 ## K70 hardware milestones
 
 Each stage needs its own device evidence before progressing. Current status is

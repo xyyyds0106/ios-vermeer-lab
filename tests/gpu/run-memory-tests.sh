@@ -12,3 +12,8 @@ if [ "$(uname -s)" = Linux ]; then no_pie=-no-pie; fi
   -o "$tmp/memory-test"
 UBSAN_OPTIONS=halt_on_error=1 "$tmp/memory-test"
 UBSAN_OPTIONS=halt_on_error=1 "$tmp/memory-test" pool-quarantine
+"${CC:-clang}" -std=c11 -g -O1 -Wall -Wextra -Werror \
+  -fsanitize=address,undefined -fno-omit-frame-pointer $no_pie \
+  "$root/tests/gpu/hfi_startup_test.c" "$root/gpu/AdrenoFirmware/AdrenoHfiStartup.c" \
+  -o "$tmp/hfi-startup-test"
+UBSAN_OPTIONS=halt_on_error=1 "$tmp/hfi-startup-test"
