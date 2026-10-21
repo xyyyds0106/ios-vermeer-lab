@@ -1,7 +1,11 @@
 param([string]$Compiler = 'gcc', [switch]$Analyze)
 $ErrorActionPreference = 'Stop'
 $taskRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-$taskOutput = Join-Path ([IO.Path]::GetTempPath()) ('k70-cellular-tests-' + [guid]::NewGuid().ToString('N'))
+$taskTemporary = Join-Path (Split-Path -Parent $taskRoot) 'build/tmp'
+$taskOutput = Join-Path $taskTemporary ('k70-cellular-tests-' + [guid]::NewGuid().ToString('N'))
+$env:TEMP = $taskTemporary
+$env:TMP = $taskTemporary
+New-Item -ItemType Directory -Force -Path $taskTemporary | Out-Null
 New-Item -ItemType Directory -Path $taskOutput | Out-Null
 foreach ($taskTest in @('cellular_service', 'cellular_qrtr')) {
     $taskSource = Join-Path $PSScriptRoot ($taskTest + '_test.c')

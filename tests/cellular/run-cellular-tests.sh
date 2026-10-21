@@ -2,6 +2,9 @@
 # Offline only. No sockets, device files or native radio backend.
 set -eu
 cd "$(dirname "$0")/../.."
+TMPDIR="$(pwd)/../build/tmp"
+mkdir -p "$TMPDIR"
+export TMPDIR
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT HUP INT TERM
 for name in cellular_service cellular_qrtr; do

@@ -145,6 +145,19 @@ if gui:
             fromfile='/dev/null', tofile='b/bsd/dev/' + name))
     generated += (source.parent / 'vermeer/0067-vermeer-touch-hook.patch').read_text()
     (target / '0067-vermeer-touch-hook.patch').write_text(generated)
+    # Actual board power/reset provider. Its live-FDT and boot-argument gates
+    # run before mappings or I/O; the strong CPU PM hooks share its lifetime.
+    generated = ''
+    for name in ('vermeer_rpmh_board.c', 'vermeer_rpmh_board.h',
+                 'vermeer_rpmh_board_dt.h', 'vermeer_rpmh_board_contract.h',
+                 'vermeer_rpmh_touch_native.h', 'vermeer_rpmh_touch_power.h',
+                 'vermeer_rpmh_observe.h', 'vermeer_rpmh_pm.cpp'):
+        data = (source.parent / 'vermeer' / name).read_text()
+        generated += ''.join(difflib.unified_diff([], data.splitlines(True),
+            fromfile='/dev/null', tofile='b/bsd/dev/' + name))
+    generated += (source.parent / 'vermeer/0069-vermeer-rpmh-hook.patch').read_text()
+    generated += (source.parent / 'vermeer/vermeer_rpmh_pm_hook.patch').read_text()
+    (target / '0069-vermeer-rpmh.patch').write_text(generated)
     # Generic graphics fixes only; no Sweet touch, PMIC, SMP or UFS drivers.
     for number in (64, 68):
         patch = next(source.glob(f'{number:04d}-*.patch'))

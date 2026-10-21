@@ -1,0 +1,18 @@
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -113,4 +113,6 @@
+ bsd/dev/vermeer_touch_smmu_tables.c	standard
+ bsd/dev/vermeer_touch_smmu_context.c	standard
++bsd/dev/vermeer_rpmh_board.c		standard
++bsd/dev/vermeer_rpmh_pm.cpp		standard
+ bsd/dev/memdev.c			standard
+ bsd/dev/mem.c				standard
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -1109,4 +1109,6 @@
+ 	sweet_sample_start();
+ 	extern void vermeer_touch_start(void);
++	extern int vermeer_rpmh_touch_start_from_adt(void);
++	(void)vermeer_rpmh_touch_start_from_adt();
+ 	vermeer_touch_start();
+ 	extern void vermeer_restart_probe_start(void);

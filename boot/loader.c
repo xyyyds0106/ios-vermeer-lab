@@ -12,6 +12,7 @@
 #include "fdt.h"
 #include "loader.h"
 #include "ram_guard.h"
+#include "boot_fdt.h"
 
 #define BOOT_LINE_LENGTH	608
 #define PAGE_16K		0x4000UL
@@ -162,6 +163,18 @@ const char *loader_boot(uintptr_t dtb)
 	/* ADT, then boot_args, behind the kernel; everything below topOfKernelData is ours. */
 	uintptr_t adt_pa = p->kernel_end + pa_of_va_base;
 	copy64(adt_pa, rd_start + p->adt_off, p->adt_size);
+	size_t boot_fdt_offset;
+	int boot_fdt_present = boot_fdt_slot((const uint8_t *)adt_pa, p->adt_size, &boot_fdt_offset);
+	if (boot_fdt_present < 0)
+		return "invalid boot FDT ADT slot";
+	if (boot_fdt_present) {
+		/* highram's complete live FDT guard has already checked the actual
+		 * ABL pointer and its hard physical mapping bound, before RAM writes.
+		 */
+		if (!highram || boot_fdt_bridge((uint8_t *)adt_pa, p->adt_size,
+		    (const uint8_t *)dtb, 0xb5f00000 - dtb) != 1)
+			return "live boot FDT copy refused";
+	}
 	uintptr_t ba_pa = (adt_pa + p->adt_size + PAGE_16K - 1) & ~(PAGE_16K - 1);
 	uintptr_t top = ba_pa + PAGE_16K;
 

@@ -3,11 +3,17 @@ on:
   push:
     paths:
       - 'gpu/**'
+      - 'boot/**'
+      - 'tests/*boot*fdt*'
       - 'tests/gpu/**'
+      - 'tests/k70gpu/**'
       - 'tests/*touch*'
       - 'tests/*geni*'
-      - 'tests/gpi_test.c'
-      - 'xnu/vermeer/vermeer_gpi.h'
+      - 'tests/*gpi*'
+      - 'tests/*rpmh*'
+      - 'xnu/vermeer/vermeer_gpi*'
+      - 'xnu/vermeer/vermeer_rpmh*'
+      - 'xnu/vermeer/0069-*'
       - 'tests/goodix_packet_test.c'
       - 'tests/gui_profile_test.py'
       - 'xnu/vermeer/vermeer_touch*'
@@ -15,15 +21,22 @@ on:
       - 'xnu/vermeer/vermeer_goodix*'
       - 'xnu/vermeer/0067-*'
       - 'tools/prepare_vermeer.py'
+      - 'tools/mkvermeeradt.py'
       - '.github/workflows/gpu-touch-checks.yml'
   pull_request:
     paths:
       - 'gpu/**'
+      - 'boot/**'
+      - 'tests/*boot*fdt*'
       - 'tests/gpu/**'
+      - 'tests/k70gpu/**'
       - 'tests/*touch*'
       - 'tests/*geni*'
-      - 'tests/gpi_test.c'
-      - 'xnu/vermeer/vermeer_gpi.h'
+      - 'tests/*gpi*'
+      - 'tests/*rpmh*'
+      - 'xnu/vermeer/vermeer_gpi*'
+      - 'xnu/vermeer/vermeer_rpmh*'
+      - 'xnu/vermeer/0069-*'
       - 'tests/goodix_packet_test.c'
       - 'tests/gui_profile_test.py'
       - 'xnu/vermeer/vermeer_touch*'
@@ -31,6 +44,7 @@ on:
       - 'xnu/vermeer/vermeer_goodix*'
       - 'xnu/vermeer/0067-*'
       - 'tools/prepare_vermeer.py'
+      - 'tools/mkvermeeradt.py'
       - '.github/workflows/gpu-touch-checks.yml'
   workflow_dispatch:
 permissions:
@@ -48,3 +62,5 @@ jobs:
         run: sh tests/run-gpu-touch-tests.sh
       - name: GUI and non-GUI packaging isolation
         run: python3 tests/gui_profile_test.py
+      - name: Live boot FDT handoff bounds
+        run: CC=clang sh tests/run-boot-fdt-tests.sh

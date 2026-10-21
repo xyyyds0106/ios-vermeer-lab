@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
+TMPDIR="$(pwd)/../build/tmp"
+mkdir -p "$TMPDIR"
+export TMPDIR
 build_dir=$(mktemp -d)
 trap 'rm -f "$build_dir/camera_cci" "$build_dir/bt_uart_gpi" "$build_dir/bt_uart_service" "$build_dir/service.inc"; rmdir "$build_dir"' EXIT HUP INT TERM
 set --

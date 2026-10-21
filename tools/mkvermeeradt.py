@@ -77,6 +77,9 @@ def build(highram=False, ios=False, gui=False, product_adt=None):
     if gui:
         if product_adt is None:
             raise ValueError('GUI profile requires the locally extracted D22AP product ADT')
+        # The loader fills this zero slot from its actual ABL FDT argument.
+        # Never embed a saved handset DT in a remotely built source payload.
+        chosen.props.append(('vermeer,boot-fdt', 0, bytes(0x200000)))
         firmware_tree, _ = adt.parse(Path(product_adt).read_bytes())
         product = next(c for c in firmware_tree.children if c.name == 'product')
         # Generic firmware product description only; skip syscfg placeholders.
