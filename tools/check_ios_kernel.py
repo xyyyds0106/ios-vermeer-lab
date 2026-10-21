@@ -8,6 +8,7 @@ required = (
     b'SWEET WDT: IOWatchdog registered', b'IOWatchdogUserClient',
     b'CRASH %s reason', b'VERMEER ROOT: first-boot test systembag prepared',
     b'VERMEER USB: CDC ACM debug004', b'K70DBG004',
+    b'VERMEER ROOT: experimental clean-root migration baseline:',
 )
 if '--gui' in sys.argv:
     required += (b'IOMobileFramebufferUserClient', b'IOCoreSurfaceRoot',

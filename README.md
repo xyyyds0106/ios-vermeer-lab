@@ -2,6 +2,25 @@
 
 Experimental bring-up for Redmi K70 (vermeer / SM8550).
 
+GUI007 (`a6a6ddb`, Actions39549812373) boots with continued display swaps and
+passes read-only USB manual sampling, image maps and post-sample liveness.
+The same-kernel007i variant adds installer services to the selected task list.
+Real stacks identify SystemAppMigrator waiting for app-store/installation
+completion while appstored also waits in DataMigration. The reference root
+tweaks document this clean-root upgrade-migration delay as well.
+
+The next opt-in repair, `vermeer_migration_baseline=1`, initializes only the
+20H392 migration-version preference on the disposable root. It stages/syncs a
+complete plist, preserves an existing preference inode in an exclusive hidden
+backup, publishes with an exclusive rename, and records a one-time marker.
+Existing backup/ambiguous state is refused; optional preparation failure leaves
+the normal migration boot and USB available. Host failure injection covers
+every transaction step, interrupted recovery and repeated invocation. Root
+UUID/extent checks remain prerequisites; the actual SystemVersion must match
+16.7.16/20H392. This is a laboratory bootstrap, not evidence that Apple's
+migration plugins completed. Setup and activation records are not modified.
+Full build and real-device validation of this repair remain pending.
+
 GUI006s reuses the verified GUI006 kernel with selected-process sampling.
 Repeated symbolicated snapshots show SpringBoard waiting for the system-shell
 check-in, backboardd waiting for DataMigration, and the migration daemon waiting

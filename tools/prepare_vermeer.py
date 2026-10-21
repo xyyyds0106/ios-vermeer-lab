@@ -94,6 +94,7 @@ if ufs_probe:
         names += ('vermeer_ufs_block.c', 'vermeer_gpt.h')
     if ios:
         names += ('vermeer_ufs_ios.c', 'vermeer_media_policy.h', 'vermeer_ios_bootstrap.c',
+                  'vermeer_migration_transaction.h',
                   'vermeer_log_ring.h', 'vermeer_debug.c',
                   'vermeer_usb_protocol.h', 'vermeer_usb_debug.c')
     for name in names:
@@ -108,6 +109,8 @@ if ios:
                     target / '0023-vermeer-ios-bootstrap.patch')
     shutil.copyfile(source.parent / 'vermeer/0024-vermeer-usb-debug-hook.patch',
                     target / '0024-vermeer-usb-debug-hook.patch')
+    shutil.copyfile(source.parent / 'vermeer/0025-vermeer-migration-vfs.patch',
+                    target / '0025-vermeer-migration-vfs.patch')
 if gui:
     shutil.copyfile(source.parent / 'vermeer/0060-vermeer-gui-guards.patch',
                     target / '0060-vermeer-gui-guards.patch')
