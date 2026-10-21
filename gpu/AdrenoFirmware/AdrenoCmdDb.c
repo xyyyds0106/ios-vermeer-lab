@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "AdrenoCmdDb.h"
-static const char names[AdrenoCmdDbResources][9]={"gfx.lvl","cx.lvl","mx.lvl","gmxc.lvl","SH0","MC0","ACV","CN0"};
+static const char names[AdrenoCmdDbResources][9]={"gfx.lvl","cx.lvl","mx.lvl","gmxc.lvl","SH0","MC0","ACV","CN0","mxc.lvl"};
 const char *AdrenoCmdDbResourceName(unsigned i){return i<AdrenoCmdDbResources?names[i]:"?";}
 static uint16_t u16(const uint8_t *p){return (uint16_t)p[0]|(uint16_t)p[1]<<8;}
 static uint32_t u32(const uint8_t *p){return (uint32_t)u16(p)|(uint32_t)u16(p+2)<<16;}
@@ -42,10 +42,11 @@ unsigned AdrenoCmdDbParse(const uint8_t *image,size_t bytes,unsigned qualified_v
         for(unsigned j=0;j<r->rows;j++)if(overlap(at,length,offsets[j],24u*counts[j]))
             return fail(r,AdrenoCmdDbBounds);
         for(unsigned target=0;target<AdrenoCmdDbResources;target++)if(id==key((const uint8_t *)names[target])) {
-            struct AdrenoCmdDbResource *out=&r->resource[target];unsigned type=target<4?3:5;
+            struct AdrenoCmdDbResource *out=&r->resource[target];
+            unsigned arc=target<4 || target==AdrenoCmdDbMxc,type=arc?3:5;
             uint32_t addr=u32(entry+16);
             if(types[row]!=type || !addr || (addr&3u) || ((addr>>16)&7u)!=type || addr>UINT32_MAX-16 ||
-               !length || length>sizeof(out->aux) || (target<4?(length&1u):length!=8))
+               !length || length>sizeof(out->aux) || (arc?(length&1u):length!=8))
                 return fail(r,AdrenoCmdDbUnsupported);
             for(unsigned j=0;j<AdrenoCmdDbResources;j++)if((r->found_mask&(1u<<j)) && r->resource[j].address==addr)
                 return fail(r,AdrenoCmdDbDuplicate);

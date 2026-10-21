@@ -8,6 +8,7 @@ static uint64_t ticks;
 static bool revoked;
 static bool gmu_ready;
 static unsigned cp_mode;
+static bool secure_exited;
 static uint8_t *gpu_registers;
 static uint8_t *smmu_registers;
 static IOReturn reserve(void *){++reserve_calls;return kIOReturnSuccess;}
@@ -37,12 +38,15 @@ static int idle(void *){
         unsigned n=type==4?(h&127):(h&0x3fff),op=(h>>16)&127;
         assert((type==4 || type==7) && n<=end-at);
         if(type==7 && op==0x3d){
+            assert(secure_exited); /* ordinary writes follow the exit fence */
             assert(n==5 && ring[at]==0x308000 && ring[at+1]==0);
             if(cp_mode!=2)for(unsigned i=0;i<3;++i)scratch[i]=ring[at+2+i];
             if(cp_mode==5)scratch[1023]=0;
         }else if(type==7 && op==0x46){
             assert(n==4 && ring[at]==0x88000031 && ring[at+1]==0x300004 && !ring[at+2]);
-            if(cp_mode!=3 || ring[at+3]==1)fence[1]=cp_mode==4?99:ring[at+3];
+            if(cp_mode!=3 || ring[at+3]<=2)fence[1]=cp_mode==4?99:ring[at+3];
+        }else if(type==7 && op==0x66){
+            assert(n==1 && !ring[at] && !secure_exited);secure_exited=true;
         }else if(type==7)assert((op==0x17&&n==1)||(op==0x48&&n==7));
         at+=n;
     }
@@ -96,18 +100,28 @@ int main(){
         auto *sm=reinterpret_cast<uint32_t *>(smmu);
         sm[0x20/4]=(1u<<30)|(1u<<27)|(4u<<9)|8;sm[0x24/4]=0x40000010;sm[0x28/4]=0x1433;sm[0]=0x436;
         for(unsigned i=0;i<8;++i)sm[(0xc00+4*i)/4]=0x20000;
-        cp_mode=mode;ticks=0;revoked=false;
+        cp_mode=mode;ticks=0;revoked=false;secure_exited=false;
         {
             K70Gpu actual;IOReturn status=actual.run(&c,&r);
+            if(!status){
+                assert(r.cp_ready && !r.normal_mode_ready && !r.hardware_complete && !r.write_fence);
+                assert(actual.verifyScratch()==kIOReturnNotReady && !secure_exited);
+                uint32_t secure_fence=0;status=actual.leaveSecureAfterPas(&secure_fence);
+                if(!status){
+                    assert(secure_exited && secure_fence==2 && r.normal_mode_ready && !r.hardware_complete);
+                    status=actual.verifyScratch();
+                    if(!status)assert(actual.verifyScratch()==kIOReturnBusy);
+                }
+            }
             if((mode==1 && status)||(mode!=1 && !status))std::fprintf(stderr,"peer mode=%u stage=%u status=%d cp=%u write=%u seen=%u fault=%x\n",mode,unsigned(r.stage),status,r.cp_fence,r.write_fence,r.observed_fence,r.fault_flags);
             /* Uses actual production allocator, SMMU and VM, not their stubs. */
             assert(fixture.live.size()==6);
             for(unsigned i=2;i<5;++i)assert(r.logical_bytes[i]==4096 && r.cpu_owned_bytes[i]==16384 && r.gpu_spans[i]==1);
-            if(mode==1)assert(!status && r.hardware_complete && r.stage==K70GpuComplete && r.cp_fence==1 && r.write_fence==2 && r.matched_words==1024);
+            if(mode==1)assert(!status && r.hardware_complete && r.stage==K70GpuComplete && r.cp_fence==1 && r.write_fence==3 && r.matched_words==1024);
             else assert(status && !r.hardware_complete && r.resources_must_retain);
             if(mode==0)assert(r.stage==K70GpuCp && r.cp_fence==1 && !r.observed_fence);
             if(mode==2 || mode==5)assert(r.stage==K70GpuScratch);
-            if(mode==3)assert(r.stage==K70GpuScratch && r.observed_fence==1);
+            if(mode==3)assert(r.stage==K70GpuScratch && r.observed_fence==2);
         }
         /* Test-only arena destruction after the software peer is stopped.
          * Production intentionally has no cleanup after uncertain execution. */

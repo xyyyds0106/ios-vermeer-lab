@@ -176,6 +176,17 @@ IOReturn K70Gpu::run(const K70GpuConfig *c,K70GpuResult *r)
     NativeAdrenoRingClock clock{this,now,idle};
     if((status=cp_.run(&ring_io_,&ring_,&init,&r->cp_fence)))return fail(status);
     if(ring_.wait(r->cp_fence,&clock,200000,&r->observed_fence)!=NativeAdrenoRingFenceComplete||guard())return fail(kIOReturnTimeout);
+    /* a6xx_gpu.c authenticates ZAP and exits secure mode after ME_INIT,
+     * before ordinary memory work. A CP-init fence alone proves no such
+     * transition and must not authorize the scratch write. */
+    r->cp_ready=1;return r->status=kIOReturnSuccess;
+}
+IOReturn K70Gpu::verifyScratch()
+{
+    if(!r_ || !r_->cp_ready || !r_->normal_mode_ready || guard())return kIOReturnNotReady;
+    if(scratch_attempted_)return kIOReturnBusy;
+    scratch_attempted_=true;auto *r=r_;IOReturn status;
+    NativeAdrenoRingClock clock{this,now,idle};
     r->stage=K70GpuScratch;
     auto *scratch=static_cast<volatile uint32_t *>(bo_[4].mapping());
     for(size_t i=0;i<sizes[4]/4;++i)scratch[i]=0xdeadbeef;
@@ -200,11 +211,13 @@ IOReturn K70Gpu::run(const K70GpuConfig *c,K70GpuResult *r)
 IOReturn K70Gpu::leaveSecureAfterPas(uint32_t *fence)
 {
     if(!fence)return kIOReturnBadArgument;*fence=0;
-    if(!r_ || !r_->hardware_complete || guard())return kIOReturnNotReady;
+    if(!r_ || !r_->cp_ready || guard())return kIOReturnNotReady;
+    if(r_->normal_mode_ready)return kIOReturnBusy;
     uint32_t words[2]={0,0};
     if(AdrenoPM4Type7(0x66,1,&words[0])!=AdrenoPM4Success)return fail(kIOReturnIOError);
     IOReturn status=ring_.submit(words,2,fence);if(status)return fail(status);
     NativeAdrenoRingClock clock{this,now,idle};uint32_t observed=0;
     if(ring_.wait(*fence,&clock,200000,&observed)!=NativeAdrenoRingFenceComplete || guard())return fail(kIOReturnTimeout);
+    r_->normal_mode_ready=1;
     return kIOReturnSuccess;
 }

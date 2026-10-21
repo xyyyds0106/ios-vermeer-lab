@@ -11,6 +11,7 @@ class Bootstrap final {
 public:
     K70GpuNativeInput in{};K70GpuNativeResult result{};K70GpuPowerLease power{};
     K70GmuProfile profile{};K70GmuSetupWrite setup[64]{};AdrenoHfiStartupConfig startup{};
+    unsigned perf_index=0,bandwidth_index=0;
     K70Gpu gpu;K70GmuNative gmu;K70Zap zap;
     IOMemoryMap *maps[10]{};K70GpuWindow windows[10]{};
     uint64_t began=0,last=0;bool failed=false,powered=false;
@@ -65,6 +66,7 @@ public:
     int allocateSmmu(){
         uint32_t id0,id1,scr0,fault;
         if(read(2,0x20,&id0)||read(2,0x24,&id1)||read(2,0,&scr0)||read(2,0x48,&fault)||fault)return 1;
+        result.smmu_id0=id0;result.smmu_id1=id1;
         const unsigned stride=(id1>>31)?0x10000:0x1000,pages=1u<<(((id1>>28)&7)+1);
         const unsigned banks=id1&255,s2=(id1>>16)&255,slots=id0&255;
         if(stride!=0x1000 || !banks || banks>64 || banks>pages || s2 || banks<2 || !slots || slots>128 || slots<3 ||
@@ -83,10 +85,17 @@ public:
         result.slots[0]=0;result.slots[1]=1;result.slots[2]=2;
         for(unsigned i=0;i<3;++i)if(write(2,0xc00+4*result.slots[i],2u<<16)||
             write(2,0x800+4*result.slots[i],0))return 1;
-        /* MMU500 CPRE errata: clear only CPRE in the leased banks; do not
-         * copy a sheng-observed ACTLR=0x301 or rewrite every context bank. */
+        /* K70 GPU qsmmuv500_init_cb applies the complete live FDT ACTLR
+         * policy matching these SIDs. This differs from the generic MMU500
+         * reset/CPRE rule and from the apps-SMMU touch policy. Only these
+         * two disabled, owned banks are changed; locked writes must refuse. */
         for(unsigned b=0;b<2;++b){size_t cb=(pages+b)*stride;uint32_t v;
-            if(read(2,cb+4,&v)||write(2,cb+4,v&~2u))return 1;
+            if(read(2,cb+4,&v))return 1;
+            result.smmu_old_actlr[b]=v;
+            uint32_t desired=in.smmu_actlr,actual;
+            if(write(2,cb+4,desired)||barrier(this)||read(2,cb+4,&actual))return 1;
+            result.smmu_new_actlr[b]=actual;
+            if(actual!=desired)return 1;
         }
         uint32_t desired=(scr0|0x406)&~1u;
         if(id0&(1u<<8))desired|=8;else desired&=~8u;
@@ -97,6 +106,16 @@ public:
         if(time(p,&s.began))return kIOReturnIOError;s.last=s.began;
         int status=K70GpuPowerAcquire(&s.in.power,&s.power);s.powered=true;
         if(status || s.guard())return kIOReturnNotReady;
+        const AdrenoHfiStartupConfig *configuration=nullptr;
+        if(K70GpuPowerConfiguration(&s.power,&configuration,&s.perf_index,&s.bandwidth_index)||
+           !configuration||AdrenoHfiStartupValidate(configuration)!=AdrenoHfiStartupSuccess||
+           !s.perf_index||s.perf_index>=configuration->gpu_count||
+           s.bandwidth_index>=configuration->bandwidth_count||
+           configuration->gpu[s.perf_index].hz!=s.in.power.gpu_hz||s.guard())return kIOReturnNotReady;
+        bool gmu_rate_found=false;
+        for(unsigned i=1;i<configuration->gmu_count;++i)gmu_rate_found|=configuration->gmu[i].hz==s.in.power.gmu_hz;
+        if(!gmu_rate_found)return kIOReturnNotReady;
+        s.startup=*configuration;
         /* Mapping creates no read of a powered-off block. The power lease
          * establishes controller access; subsequent clock/GMU gates order I/O. */
         for(unsigned i=0;i<10;++i){
@@ -120,7 +139,7 @@ public:
         const unsigned map[]={1,3,4,0,5};for(unsigned i=0;i<5;++i)c.windows[i]=s.windows[map[i]];
         c.smmu=s.windows[2];c.bank=s.result.gmu_bank;c.asid=2;c.slot=s.result.slots[2];
         c.chip_id=s.in.chip_id;c.profile=s.in.gmu_profile;c.firmware=s.in.gmu;c.firmware_bytes=s.in.gmu_bytes;
-        c.startup=s.in.startup;c.perf_index=s.in.perf_index;c.bandwidth_index=s.in.bandwidth_index;c.total_timeout_us=5000000;
+        c.startup=&s.startup;c.perf_index=s.perf_index;c.bandwidth_index=s.bandwidth_index;c.total_timeout_us=5000000;
         return s.gmu.run(&c,&s.result.gmu);
     }
 };
@@ -129,11 +148,17 @@ Bootstrap *retained;unsigned attempted;
 extern "C" IOReturn K70GpuNativeStart(const K70GpuNativeInput *in,const K70GpuNativeResult **out)
 {
     if(!out)return kIOReturnBadArgument;*out=nullptr;
-    if(!in||!in->gmu_profile||in->gmu_profile->qualified!=1||in->chip_id!=in->gmu_profile->chip_id||
+    if(!in||!in->gmu_profile||in->gmu_profile->qualified!=1||!in->chip_id||
+       in->chip_id!=in->gmu_profile->chip_id||in->gmu_profile->gmu_chip_id!=0x07020100||
+       !in->gmu_profile->firmware_blocks||in->gmu_profile->firmware_blocks>32||
+       in->smmu_actlr_qualified!=1||in->smmu_actlr!=0x32b||
        !in->gmu_profile->setup||!in->gmu_profile->setup_count||in->gmu_profile->setup_count>64||
-       !in->startup||AdrenoHfiStartupValidate(in->startup)!=AdrenoHfiStartupSuccess||
        in->power.gmu_hz!=220000000||in->power.gpu_hz!=220000000||!in->power.bandwidth_kbps)
         return kIOReturnBadArgument;
+    for(size_t i=0;i<in->gmu_profile->setup_count;++i){const auto &w=in->gmu_profile->setup[i];
+        if((w.window!=K70GmuRscc && w.window!=K70GmuPdc)||(w.byte_offset&3)||w.byte_offset>0x10000-4)
+            return kIOReturnBadArgument;
+    }
     NativeAdrenoFirmwareView fw{};NativeAdrenoFirmwareRules gmu_rules{};
     gmu_rules.bytes=in->gmu_profile->firmware_bytes;
     for(unsigned i=0;i<32;++i)gmu_rules.sha256[i]=in->gmu_profile->sha256[i];
@@ -142,9 +167,9 @@ extern "C" IOReturn K70GpuNativeStart(const K70GpuNativeInput *in,const K70GpuNa
        NativeAdrenoFirmware::validate(in->zap,in->zap_bytes,&in->zap_rules,&fw))return kIOReturnBadArgument;
     unsigned zero=0;if(!__atomic_compare_exchange_n(&attempted,&zero,1,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return kIOReturnBusy;
     retained=new Bootstrap;if(!retained)return kIOReturnNoMemory;
-    auto &s=*retained;s.in=*in;s.profile=*in->gmu_profile;s.startup=*in->startup;
+    auto &s=*retained;s.in=*in;s.profile=*in->gmu_profile;
     for(size_t i=0;i<s.profile.setup_count;++i)s.setup[i]=in->gmu_profile->setup[i];
-    s.profile.setup=s.setup;s.in.gmu_profile=&s.profile;s.in.startup=&s.startup;
+    s.profile.setup=s.setup;s.in.gmu_profile=&s.profile;
     s.result.used=1;s.result.resources_must_retain=1;*out=&s.result;
     /* Core prevalidates exact window shapes before reserve. Only reserve
      * obtains their mappings, so execute reserve here and give the core a
@@ -160,7 +185,8 @@ extern "C" IOReturn K70GpuNativeStart(const K70GpuNativeInput *in,const K70GpuNa
         K70ZapServices services{&s,Bootstrap::lease,Bootstrap::time,Bootstrap::delay};
         status=s.zap.run(s.in.zap,s.in.zap_bytes,&s.in.zap_rules,&services,&s.result.zap);
         if(!status){s.result.stage=7;status=s.gpu.leaveSecureAfterPas(&s.result.secure_fence);}
-        if(!status)s.result.stage=8;
+        if(!status){s.result.stage=8;status=s.gpu.verifyScratch();}
+        if(!status)s.result.stage=9;
     }
     s.result.status=status;
     if(status){s.failed=true;K70GpuPowerQuarantine(&s.power);}return status;

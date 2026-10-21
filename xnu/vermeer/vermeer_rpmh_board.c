@@ -181,7 +181,7 @@ static void vrb_gpu_db_probe(void)
     vrb_gpu_db_copy_status=error;
     if(error){printf("VERMEER GPU DB: copy refused status=%u; no GPU I/O\n",error);return;}
     unsigned status=AdrenoCmdDbParse(vrb_gpu_db_copy,sizeof(vrb_gpu_db_copy),1,&vrb_gpu_db);
-    printf("VERMEER GPU DB: status=%u complete=%u rows=%u entries=%u found=%02x stable-two-pass=1 gpu-enabled=0\n",
+    printf("VERMEER GPU DB: status=%u complete=%u rows=%u entries=%u found=%03x stable-two-pass=1 gpu-enabled=0\n",
         status,vrb_gpu_db.complete,vrb_gpu_db.rows,vrb_gpu_db.entries,vrb_gpu_db.found_mask);
     if(status!=AdrenoCmdDbOK)for(unsigned i=0;i<8;i++) {
         /* Bounded retained-RAM diagnostics, including empty directory rows.

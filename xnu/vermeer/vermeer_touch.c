@@ -1,5 +1,5 @@
 /* Experimental K70 GT9916 / GENI SPI SE4 physical input.
- * Only --ios-gui + vermeer_touch=1 + exact physical-model can enter here.
+ * Only --ios-gui + vermeer_touch=1/2 + exact physical-model can enter here.
  * Fixed DT/official MiCode GPI, clock and pin contract. Actual board power
  * sequencing belongs to the registered RPMh/reset provider. No firmware/config
  * upload, storage access or arbitrary debug MMIO command. Identity gates HID.
@@ -31,6 +31,8 @@ extern ppnum_t pmap_find_phys(pmap_t,addr64_t);
 extern void sweet_hid_touch(int,int,int,int);
 extern int sweet_hid_touch_ready(void);
 extern void vermeer_debug_input_register(void (*)(void));
+extern void vermeer_debug_touch_control_register(int (*)(const char *,unsigned));
+extern int vermeer_usb_debug_ready(void);
 void vermeer_touch_start(void);
 
 #define VT_SE 0x00a90000u
@@ -50,6 +52,7 @@ static struct {
     uint32_t vote_added,pins[4],saved[VT_NREGS];
     bool pins_saved,engine_saved,root_forced,fifo_owned,gpi_probe;
     bool use_gpi,power_held,gpi_claimed,identity_mapping;
+    unsigned manual_mode;unsigned _Atomic manual_phase;
     vm_offset_t dma_va;uint64_t dma_pa;
     struct vgpt transport;struct vti iommu;struct vtr_route identity_route;
     const struct vtp_ops *power;
@@ -77,6 +80,8 @@ static struct {
 } touch={.route_reason=VTR_UNSAMPLED,.gpi_reason=VTR_UNSAMPLED,
     .iommu_bank=UINT32_MAX,.iommu_slot=UINT32_MAX};
 enum { VT_WAIT=1,VT_CLOCK,VT_FIRMWARE,VT_IDENTITY,VT_READY,VT_STOPPED };
+enum {VT_MANUAL_OFF,VT_MANUAL_POWER_WAIT,VT_MANUAL_POWER_QUEUED,VT_MANUAL_POWERING,
+      VT_MANUAL_START_WAIT,VT_MANUAL_START_QUEUED,VT_MANUAL_RUNNING,VT_MANUAL_STOPPED};
 static uint32_t vt_rd(vm_offset_t base,unsigned reg)
 {
     uint32_t v=*(volatile uint32_t *)(base+reg);
@@ -100,6 +105,8 @@ static void vt_sleep(unsigned ms)
 }
 static void vt_status(void)
 {
+    printf("VERMEER TOUCH: manual-mode=%u manual-phase=%u usb-ready=%d\n",touch.manual_mode,
+        os_atomic_load(&touch.manual_phase,acquire),vermeer_usb_debug_ready());
     printf("VERMEER TOUCH: stage=%u reports=%llu bad=%llu spi=%llu emitted=%llu header=%08x source=physical-spi\n",
         os_atomic_load(&touch.stage,relaxed),os_atomic_load(&touch.reports,relaxed),
         os_atomic_load(&touch.bad,relaxed),os_atomic_load(&touch.transactions,relaxed),
@@ -378,18 +385,55 @@ static int vt_identify(void)
     printf("VERMEER TOUCH: GT9916 verified, event=%08x axes=%ux%u\n",
         touch.info.event,touch.info.max_x,touch.info.max_y);return 1;
 }
+/* Called on the USB worker: exact names, RAM state and atomic queue only.
+ * No clocks, regulator, SMMU, GPI, GPIO or SPI access is permitted here. */
+static int vt_manual_request(const char *text,unsigned n)
+{
+    unsigned from,to;
+    if(!text)return 0;
+    if(n==11 && !memcmp(text,"touch-power",11)){from=VT_MANUAL_POWER_WAIT;to=VT_MANUAL_POWER_QUEUED;}
+    else if(n==11 && !memcmp(text,"touch-start",11)){from=VT_MANUAL_START_WAIT;to=VT_MANUAL_START_QUEUED;}
+    else return 0;
+    if(touch.manual_mode!=2 || !vermeer_usb_debug_ready() ||
+       !os_atomic_cmpxchg(&touch.manual_phase,from,to,acq_rel))
+        printf("VERMEER TOUCH: manual request refused mode=%u phase=%u (power must complete before start)\n",
+            touch.manual_mode,os_atomic_load(&touch.manual_phase,acquire));
+    else printf("VERMEER TOUCH: %.*s queued; worker performs hardware phase\n",(int)n,text);
+    return 1;
+}
+static void vt_manual_wait(unsigned phase)
+{
+    while(os_atomic_load(&touch.manual_phase,acquire)!=phase || !vermeer_usb_debug_ready())vt_sleep(100);
+}
 static void vt_thread(void *arg,wait_result_t result)
 {
     (void)arg;(void)result;
+    if(touch.manual_mode==2) {
+        printf("VERMEER TOUCH: manual mode armed; waiting for USB and touch-power; no touch hardware access\n");
+        vt_manual_wait(VT_MANUAL_POWER_QUEUED);
+        os_atomic_store(&touch.manual_phase,VT_MANUAL_POWERING,release);
+        printf("VERMEER TOUCH PHASE: power/GPUdb begin\n");vt_sleep(200);
+        if(!vermeer_usb_debug_ready() || !vtg_acquire_registered_power())goto stopped;
+        os_atomic_store(&touch.manual_phase,VT_MANUAL_START_WAIT,release);
+        printf("VERMEER TOUCH PHASE: power/GPUdb complete; waiting for touch-start\n");vt_sleep(200);
+        vt_manual_wait(VT_MANUAL_START_QUEUED);
+        os_atomic_store(&touch.manual_phase,VT_MANUAL_RUNNING,release);
+        printf("VERMEER TOUCH PHASE: requested start; USB baseline retained\n");vt_sleep(200);
+        if(!vermeer_usb_debug_ready() || !vtg_acquire_registered_power())goto stopped;
+    }
     /* The HID service may be registered by IOKit after Apple userspace starts. */
     for(unsigned i=0;i<1800 && !sweet_hid_touch_ready();i++)vt_sleep(100);
     if(!sweet_hid_touch_ready())goto stopped;
     os_atomic_store(&touch.stage,VT_CLOCK,relaxed);
+    printf("VERMEER TOUCH PHASE: clock begin\n");
     if(!vt_clock_enable())goto stopped;
+    printf("VERMEER TOUCH PHASE: clock complete\n");
     os_atomic_store(&touch.stage,VT_FIRMWARE,relaxed);
     if(!vt_engine_setup())goto stopped;
     os_atomic_store(&touch.stage,VT_IDENTITY,relaxed);
+    printf("VERMEER TOUCH PHASE: SPI identify begin\n");
     if(!vt_identify())goto stopped;
+    printf("VERMEER TOUCH PHASE: SPI identify complete\n");
     os_atomic_store(&touch.stage,VT_READY,relaxed);
     printf("VERMEER TOUCH: physical GT9916 input ready (%s, no firmware upload)\n",touch.use_gpi?"GPI SPI":"SPI FIFO");
     unsigned consecutive_bad=0;
@@ -417,6 +461,7 @@ bad_packet:
         vt_sleep(8);
     }
 stopped:
+    if(touch.manual_mode==2)os_atomic_store(&touch.manual_phase,VT_MANUAL_STOPPED,release);
     vt_release_all(&touch.contacts,vt_emit_hid,NULL);
     vt_restore();os_atomic_store(&touch.stage,VT_STOPPED,relaxed);vt_status();
     thread_terminate(current_thread());
@@ -424,18 +469,22 @@ stopped:
 void vermeer_touch_start(void)
 {
     int enabled=0;DTEntry entry;const void *value=NULL;unsigned size=0;
-    if(!PE_parse_boot_argn("vermeer_touch",&enabled,sizeof(enabled)) || enabled!=1)return;
+    if(!PE_parse_boot_argn("vermeer_touch",&enabled,sizeof(enabled)) || (enabled!=1 && enabled!=2))return;
     if(SecureDTLookupEntry(NULL,"/",&entry)!=kSuccess ||
        SecureDTGetProperty(entry,"physical-model",&value,&size)!=kSuccess ||
        size!=sizeof("Redmi K70") || memcmp(value,"Redmi K70",size)) {
         printf("VERMEER TOUCH: physical-model guard refused\n");return;
     }
     int probe=0;
+    touch.manual_mode=(unsigned)enabled;
+    if(enabled==2)os_atomic_store(&touch.manual_phase,VT_MANUAL_POWER_WAIT,release);
     touch.gpi_probe=PE_parse_boot_argn("vermeer_touch_gpi_probe",&probe,sizeof(probe)) && probe==1;
     os_atomic_store(&touch.stage,VT_WAIT,relaxed);vermeer_debug_input_register(vt_status);
+    vermeer_debug_touch_control_register(vt_manual_request);
     thread_t thread=THREAD_NULL;
     kern_return_t result=kernel_thread_start(vt_thread,NULL,&thread);
     if(result==KERN_SUCCESS)thread_deallocate(thread);
-    else os_atomic_store(&touch.stage,VT_STOPPED,relaxed);
+    else {os_atomic_store(&touch.stage,VT_STOPPED,relaxed);
+        if(enabled==2)os_atomic_store(&touch.manual_phase,VT_MANUAL_STOPPED,release);}
 }
 #endif

@@ -2,7 +2,8 @@ param(
     [ValidateRange(1,86400)][int]$Seconds = 600,
     [string]$Port,
     [string]$LogPath = (Join-Path $PSScriptRoot '..\..\device-audit\live-ios-004.log'),
-    [ValidateSet('help','status','ping','replay','sample','frame','input')][string]$Command = 'status',
+    [ValidateSet('help','status','ping','replay','sample','frame','input','touch-power','touch-start')][string]$Command = 'status',
+    [switch]$AuthorizedTouchControl,
     [switch]$ObserveFrames,
     [switch]$ListOnly
 )
@@ -21,6 +22,9 @@ function Find-DebugPort {
     }
 }
 if ($ListOnly) { Find-DebugPort; return }
+if ($Command -in @('touch-power','touch-start') -and -not $AuthorizedTouchControl) {
+    throw 'Manual touch hardware commands require -AuthorizedTouchControl and a mode2 image'
+}
 if ($Port -and $Port -notmatch '^COM[0-9]+$') { throw 'Invalid COM port name' }
 $deadline = [DateTime]::UtcNow.AddSeconds($Seconds)
 $serial = $null

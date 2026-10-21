@@ -26,7 +26,10 @@ typedef struct {
 } K70GmuServices;
 typedef struct {volatile uint32_t *cpu;size_t bytes;uint64_t iova;} K70GmuMemory;
 /* Private immutable qualification contract; no firmware bytes in Git.
- * Identity and gmu_chip_id must come from this board's catalog + live silicon;
+ * Identity must come from this board's actual qcom,chipid or socinfo GPU part
+ * identity, independently of the compatibility match. For gen7-2-1 the GMU
+ * GENERAL10 value is ADRENO_GMU_REV(0x070201), i.e. 0x07020100; this revision
+ * value is distinct from the actual SoC GPU part chip_id.
  * setup is derived from pinned public A740 RSC/PDC source and board resources.
  * Qualification must establish the exact full firmware digest/block layout.
  * A public reference image alone is not board qualification. */

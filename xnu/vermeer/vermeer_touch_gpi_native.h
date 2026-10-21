@@ -176,14 +176,25 @@ static int vtg_write(void *ctx,unsigned off,uint32_t value)
 }
 static int vtg_idle(void *ctx)
 {(void)ctx;if(!vtg_lease(NULL))return -1;return !(vt_rd(touch.se,VG_STATUS)&0x1001);}
+/* Registered RPMh provider owns its own GPIO/MMIO and full GPU DB snapshot.
+ * This helper intentionally needs no touch SE/GPIO/SMMU mappings, so manual
+ * mode can capture power/DB evidence before the new touch mapping path. */
+static int vtg_acquire_registered_power(void)
+{
+    if(touch.power_held)return touch.power && touch.power->valid(touch.power->ctx)==1;
+    touch.power=os_atomic_load(&vtg_power_provider,acquire);
+    if(!touch.power || touch.power->acquire(touch.power->ctx)!=1 || touch.power->valid(touch.power->ctx)!=1) {
+        printf("VERMEER TOUCH: real RPMh/reset lease acquisition failed; resources retained\n");return 0;
+    }
+    touch.power_held=true;return 1;
+}
 static int vtg_prepare(void)
 {
-    touch.power=os_atomic_load(&vtg_power_provider,acquire);
-    if(touch.power) {
-        if(touch.power->acquire(touch.power->ctx)!=1 || touch.power->valid(touch.power->ctx)!=1) {
-            printf("VERMEER TOUCH: real RPMh/reset lease acquisition failed; resources retained\n");return 0;
-        }
-        touch.power_held=true;
+    if(!touch.power_held)touch.power=os_atomic_load(&vtg_power_provider,acquire);
+    if(touch.power && !touch.power_held) {
+        printf("VERMEER TOUCH PHASE: power/GPUdb begin\n");
+        if(!vtg_acquire_registered_power())return 0;
+        printf("VERMEER TOUCH PHASE: power/GPUdb complete\n");
     }
     if(!vt_reset_ready()) {
         printf("VERMEER TOUCH: GPIO24 reset remains low; no working RPMh/reset provider registered\n");return 0;
@@ -212,6 +223,8 @@ static int vtg_prepare(void)
         if(ml_get_cpu_count()!=1) {
             printf("VERMEER TOUCH: SIDb6 attach needs shared SMMU configuration lock on multi-CPU kernels\n");return 0;
         }
+        printf("VERMEER TOUCH PHASE: SMMU attach begin; first owned register writes next\n");
+        if(touch.manual_mode==2)vt_sleep(200);
         disable_preemption();int mapped=vti_prepare(&touch.iommu);enable_preemption();
         if(!mapped) {
             const struct vti *v=&touch.iommu;
@@ -223,11 +236,15 @@ static int vtg_prepare(void)
                 v->first_unsafe_actlr,v->conflict_smr,v->conflict_s2cr);
             return 0;
         }
+        printf("VERMEER TOUCH PHASE: SMMU attach complete bank=%u slot=%u\n",touch.iommu.bank,touch.iommu.slot);
     }
     touch.transport=(struct vgpt){.io={NULL,vtg_lease,vtg_read,vtg_write,vtg_cache,vtg_now,vtg_pause,vtg_idle}};
     for(unsigned i=0;i<5;i++)touch.transport.page[i]=(struct vgpt_page){(void *)(touch.dma_va+i*PAGE_SIZE),
         touch.identity_mapping?touch.dma_pa+i*PAGE_SIZE:0x100000+i*PAGE_SIZE};
+    printf("VERMEER TOUCH PHASE: GPI start begin\n");
+    if(touch.manual_mode==2)vt_sleep(200);
     if(!vgpt_start(&touch.transport)){vtg_status();return 0;}
+    printf("VERMEER TOUCH PHASE: GPI start complete\n");
     for(unsigned i=0;i<4;i++) {
         unsigned reg=(44+i)*0x1000;touch.pins[i]=vt_rd(touch.gpio,reg);
         if(!vtg_lease(NULL))goto failed;

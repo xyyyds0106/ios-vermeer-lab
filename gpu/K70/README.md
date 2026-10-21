@@ -6,14 +6,17 @@ results, backing allocations and mappings until reboot. It calls the strong
 native RPMh power interface, maps exact K70 Device windows, starts clocks,
 reserves disabled GPU/GMU SMMU contexts, loads GMU firmware, exchanges actual
 HFI messages, obtains a fresh GPU OOB ACK, starts the SQE/CP ring and submits a
-GPU scratch write followed by a CP `CACHE_CLEAN` timestamp fence.
+GPU scratch write followed by a CP `CACHE_CLEAN` timestamp fence. The order is
+CP initialization/fence, real ZAP PAS13 authentication, secure-mode exit/fence,
+then scratch submission/fence, matching the pinned Linux startup sequence.
 
 The GPU test writes three distinct words into its own 4KB scratch mapping.
 Success requires the actual submitted fence and all 1024 scratch words to
 match: three GPU-written values and 1021 untouched sentinel words. The CPU
 writes only the initial sentinel. No CPU framebuffer copy or synthetic fence
-is used in production. ZAP PAS13 authentication and a separate secure-mode exit
-packet/fence follow that kernel-only scratch stage. No accelerator, Metal
+is used in production. `K70Gpu::run` stops after CP initialization;
+`leaveSecureAfterPas` requires the owner's completed PAS authentication, and
+`verifyScratch` refuses until its secure-mode exit fence completes. No accelerator, Metal
 device, OpenGL ABI, display integration or application submission API is
 published by this candidate.
 
@@ -26,8 +29,9 @@ Call the entry from a serialized kernel worker after native C++ and IOKit
 initialization. Keep embedded firmware immutable until reboot. There is one
 attempt; no cleanup, replay or automatic recovery path is provided.
 
-`K70GpuPower.h` declares three **strong** native power functions. They are
-dependencies on the RPMh owner's actual implementation, with no weak defaults:
+`K70GpuPower.h` declares three **strong** native power functions, implemented
+by `K70GpuPowerProvider.c` using its registered native RPMh/platform owner.
+There are no weak defaults or successful unregistered-provider path:
 
 - `K70GpuPowerAcquire` obtains the exclusive platform/clock/SCM/PAS/reserved
   microcode-region lease and completes qualified CX/MX/GFX and bandwidth votes.
@@ -42,8 +46,11 @@ GFX with GMxC when present, otherwise MX; GMU votes use CX/MX. BCM resources are
 startup configuration comes from the qualified K70 enabled OPP policy and the
 complete immutable command DB; it must not use the sheng OPP/address tables.
 `AdrenoHfiArcVotes` and `AdrenoHfiBuildBandwidth` implement the existing table
-arithmetic. The native entry currently takes that already constructed config;
-it does not discover or qualify these resource values itself.
+arithmetic. After power acquisition the native entry obtains these tables and
+their selected indices through `K70GpuPowerConfiguration`, validates/copies
+them, then uses that exact policy for GMU HFI. Its caller cannot supply a
+different startup table. Resource discovery and board qualification belong to
+the registered power provider.
 
 The clock writer supports the reviewed boot setting GMU220MHz/HUB200MHz and
 the entry restricts the first GPU test to220MHz. The K70 actual-boot FDT and
@@ -55,9 +62,10 @@ Raw native MMIO/SMC access has no external-abort containment. Power and access
 preconditions must hold before each access; no probe-read helper can make an
 unpowered register safe.
 
-This source is not wired into a kernel image. The three native power functions,
-complete command-DB/OPP setup builder, actual board/profile qualification,
-reviewed worker/build hook and hardware validation remain integration gates.
+Actual board provider registration, full live command-DB/OPP qualification,
+the firmware/identity/RSC/PDC profile, reviewed worker/build hook and hardware
+validation remain integration gates. A compiled provider alone establishes
+none of those hardware facts.
 The first image must exercise the actual execution path; host results below
 do not establish that GPU execution has occurred on a phone.
 
@@ -70,6 +78,11 @@ do not establish that GPU execution has occurred on a phone.
   Under the exclusive whole-device lease, the allocator verifies disabled
   banks and unused SMRs before assigning GPU bank0 and a distinct GMU bank1.
   SIDs0/1/5 are routed through allocated slots, not assumed SID==slot.
+  The live qualified GPU-SMMU `qcom,actlr` SID0/mask0x3ff row must specify
+  `0x32b`, which is written and read back in the two owned contexts as in
+  `qsmmuv500_init_cb`. The apps-SMMU touch CPRE-only rule does not apply to
+  this explicit GPU platform policy. Global/secure cache locks are not changed;
+  an ACTLR value that does not stick stops initialization.
 - CPU ownership remains native16KB while GPU lengths/tables remain4KB.
   GMU payloads become non-cacheable through exclusively owned native pages
   before being mapped NC; no second cacheable/NC descriptor alias is created.
@@ -110,6 +123,17 @@ Git. Fixed byte identity is distinct from real GMU loading/protocol and PAS
 authentication on K70. The complete qualification profile and RSC/PDC setup
 must be constructed from reviewed K70/catalog source and retained privately.
 They cannot be marked hardware-qualified solely because a hash matches.
+
+The pinned Xiaomi graphics driver identifies the GPU from `qcom,chipid`, or
+when that property is absent, `socinfo_get_partinfo_chip_id(SOCINFO_PART_GPU)`
+(`adreno.c` at modules commit `92a9fde479d3262da080cfd28bab0775b0da500a`).
+Its gen7-2-1 catalog uses wildcard chip-ID fields, so the compatible string
+does not establish a numeric silicon ID. There is no reviewed RBBM chip-ID
+register read in this path. The owner must supply actual DT/socinfo identity;
+neither `0x43050a01` from another catalog nor `0x07020100` may be substituted.
+The latter is instead the gen7-2-1 GMU `GENERAL10` value, derived from
+`ADRENO_GMU_REV(ADRENO_REV_GEN7_2_1)` in `adreno.h` and
+`adreno_gen7_gmu.c`, and the native entry checks that profile value.
 
 ## Verification
 

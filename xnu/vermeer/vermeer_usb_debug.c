@@ -1,7 +1,7 @@
 /* Experimental K70 CDC ACM console. Opt-in: vermeer_usb=1.
  * Reuses ABL's PHY/clocks; never changes GCC, SMMU, PMIC or storage.
  * DWC3 register/endpoint protocol: Linux drivers/usb/dwc3, reference0073.
- * USB can read the RAM console ring and issue four bounded queries only.
+ * USB reads the RAM console and queues bounded queries/explicit opt-in workers.
  * All controller memory is permanent: a timeout never frees DMA memory.
  */
 #if defined(ARM64_BOARD_CONFIG_SWEET)
@@ -12,6 +12,7 @@
 #include <mach/thread_act.h>
 #include <kern/sched_prim.h>
 #include <machine/machine_routines.h>
+#include <machine/atomic.h>
 #include <arm/caches_internal.h>
 #include <vm/pmap.h>
 #include <vm/vm_kern.h>
@@ -27,7 +28,9 @@ extern int vermeer_debug_sample_request(void);
 extern int vermeer_debug_frame_request(void);
 extern void vermeer_debug_input_status(void);
 extern int vermeer_debug_control_request(const char *,unsigned);
+extern int vermeer_debug_touch_control_request(const char *,unsigned);
 void vermeer_usb_debug_start(void);
+int vermeer_usb_debug_ready(void);
 
 #define GCTL 0xc110
 #define GEVNTADRLO 0xc400
@@ -86,6 +89,12 @@ static struct {
     bool command_overflow;
     int sleep_channel;
 } u;
+/* Published software state only. Touch never probes DWC3 from its worker. */
+static unsigned _Atomic usb_ready;
+int vermeer_usb_debug_ready(void)
+{return os_atomic_load(&usb_ready,acquire)!=0;}
+static void update_ready(void)
+{os_atomic_store(&usb_ready,!u.failed && u.configured && u.dtr,release);}
 
 static uint32_t read_reg(vm_offset_t base,unsigned off)
 {
@@ -106,6 +115,7 @@ static void sync_dma(unsigned off,unsigned size)
 }
 static void fail(const char *why)
 {
+    os_atomic_store(&usb_ready,0,release);
     if (!u.failed) printf("VERMEER USB: stopped: %s; permanent DMA retained\n",why);
     u.failed=true;
 }
@@ -167,6 +177,7 @@ static void stall(void)
 static void receive_arm(void) { transfer(2,RX,RX_SIZE,T_NORMAL); }
 static void stop_data(void)
 {
+    os_atomic_store(&usb_ready,0,release);
     for (unsigned ep=2;ep<6;ep++) {
         if (u.busy[ep]) {
             if (!u.resource[ep] || epcmd(ep,END|FORCE_REMOVE|(u.resource[ep]<<16),0,0,0)) return;
@@ -187,7 +198,7 @@ static void configure(void)
         epcmd(5,SET_CONFIG,(3u<<1)|(16u<<3)|(2u<<17),(1u<<8)|(8u<<16)|(5u<<25),0) ||
         epcmd(5,SET_RESOURCE,1,0,0)) return;
     wr(DALEPENA,3|(1u<<2)|(1u<<3)|(1u<<5));
-    u.configured=true; receive_arm();
+    u.configured=true; receive_arm();update_ready();
     printf("VERMEER USB: CDC ACM configured, bulk MPS %u\n",u.mps);
 }
 static unsigned string_desc(unsigned index,uint8_t *data)
@@ -230,6 +241,7 @@ static void handle_setup(void)
     case VUSB_CONFIG:
         /* Reconfiguration while transfers are live is stopped, never recycled
          * before a controller reset drains stale completion events. */
+        if (!value)os_atomic_store(&usb_ready,0,release);
         if (!value && u.configured) { fail("host deconfigured; reboot to reconnect"); return; }
         if (value) configure();break;
     case VUSB_GET_CONFIG:data[0]=u.configured?1:0;n=1;break;
@@ -239,9 +251,11 @@ static void handle_setup(void)
     case VUSB_SET_LINE:u.set_line=true;break;
     case VUSB_GET_LINE:memcpy(data,u.coding,7);n=7;break;
     case VUSB_CONTROL:
+        if(!(value&1))os_atomic_store(&usb_ready,0,release);
         if (u.configured) {
             bool old=u.dtr;u.dtr=(value&1)!=0;u.notify=true;
-            if (u.dtr && !old) printf("VERMEER USB: debug connected; help/status/ping/replay/sample/frame/input (read only)\n");
+            update_ready();
+            if (u.dtr && !old) printf("VERMEER USB: debug connected; queries plus opt-in manual touch-power/touch-start\n");
         }break;
     case VUSB_BREAK:break;
     case VUSB_CLEAR_HALT:
@@ -274,9 +288,12 @@ static void command_line(void)
         if (!vermeer_debug_frame_request()) printf("VERMEER FRAME: unavailable\n");
     } else if (!strcmp(u.command,"input")) {
         vermeer_debug_input_status();
+    } else if (!strcmp(u.command,"touch-power") || !strcmp(u.command,"touch-start")) {
+        if(!vermeer_usb_debug_ready() || !vermeer_debug_touch_control_request(u.command,u.command_n))
+            printf("VERMEER TOUCH: manual control unavailable\n");
     } else if (vermeer_debug_control_request(u.command,u.command_n)) {
         /* Optional GUI-only control worker: queue-only callback, default off. */
-    } else if (u.command_n) printf("VERMEER DEBUG: commands help status ping replay sample frame input; queries only\n");
+    } else if (u.command_n) printf("VERMEER DEBUG: commands help status ping replay sample frame input; manual mode: touch-power touch-start\n");
     u.command_n=0;u.command_overflow=false;
 }
 static void receive_done(unsigned length)
@@ -312,6 +329,7 @@ static void event(uint32_t e)
         if ((e&0xfe)!=0) { fail("unexpected device event format");return; }
         unsigned type=(e>>8)&15;
         if (type==1) {
+            os_atomic_store(&usb_ready,0,release);
             if (u.configured) { stop_data();fail("bus reset after configuration; reboot to reconnect");return; }
             wr(DCFG,rd(DCFG)&~(127u<<3));printf("VERMEER USB: bus reset\n");
         } else if (type==2) {
@@ -321,7 +339,7 @@ static void event(uint32_t e)
             (void)epcmd(0,SET_CONFIG,(64u<<3)|(2u<<30),(1u<<8)|(1u<<10),0);
             (void)epcmd(1,SET_CONFIG,(64u<<3)|(2u<<30),(1u<<8)|(1u<<10)|(1u<<25),0);
             printf("VERMEER USB: connected speed=%u\n",speed);
-        } else if (!type && u.configured) fail("cable disconnect; reboot to reconnect");
+        } else if (!type) {os_atomic_store(&usb_ready,0,release);if(u.configured)fail("cable disconnect; reboot to reconnect");}
         else if (type==9 || type==11) fail("controller/event overflow");
         return;
     }

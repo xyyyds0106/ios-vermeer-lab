@@ -7,7 +7,7 @@
 static const uint64_t k70_gmu_window_physical[5]={0x3d68000,0x3d50000,0xb280000,0x3d00000,0x3d9e000};
 static const size_t k70_gmu_window_bytes[5]={0x37000,0x10000,0x10000,0x40000,0x1000};
 #if (!defined(__aarch64__) && !defined(K70_GMU_HOST_TEST)) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
-#error sheng GMU requires little-endian AArch64
+#error K70 GMU requires little-endian AArch64
 #endif
 static int extent(uintptr_t at,size_t bytes)
 {return at && bytes && bytes-1<=UINTPTR_MAX-at;}

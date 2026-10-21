@@ -47,10 +47,12 @@ struct K70GpuResult {
     uint32_t scratch[4],fault_flags;
     uint64_t elapsed_us;
     size_t logical_bytes[5],cpu_owned_bytes[5],gpu_spans[5];
-    unsigned resources_must_retain,hardware_complete;
+    unsigned resources_must_retain,hardware_complete,cp_ready,normal_mode_ready;
 };
 /* Real native allocation -> native4K SMMU context -> CP/ring -> GPU write ->
- * CP CACHE_CLEAN timestamp -> CPU acquire+verify. No CPU stores write a success
+ * CP CACHE_CLEAN timestamp -> CPU acquire+verify. run() stops after CP init;
+ * the owner authenticates ZAP, calls leaveSecureAfterPas(), then verifies the
+ * scratch submission with verifyScratch(). No CPU stores write a success
  * pattern or a completed fence. One attempt, no teardown/reset guess. This
  * object has no user submission entry and never publishes an accelerator. */
 class K70Gpu final {
@@ -58,7 +60,7 @@ class K70Gpu final {
     NativeAdrenoMemory tables_,bo_[5];NativeAdrenoSmmuContext context_;
     NativeAdrenoVm vm_;NativeAdrenoRing ring_;NativeAdrenoCpInit cp_;NativeAdrenoIrq irq_;
     uint64_t handles_[5]{},begin_=0,last_=0;
-    bool used_=false,held_=false,failed_=false;
+    bool used_=false,held_=false,failed_=false,scratch_attempted_=false;
     ArmSmmu4KIo smmu_io_{};NativeAdrenoRingIo ring_io_{};
     int guard();IOReturn fail(IOReturn);
     static int gpuRead(void *,uint32_t,uint32_t *);
@@ -79,5 +81,8 @@ public:
     /* Kernel lifecycle owner calls ONLY after real PAS13 authentication.
      * Emits CP_SET_SECURE_MODE0 and waits on another actual CP fence. */
     IOReturn leaveSecureAfterPas(uint32_t *fence);
+    /* Kernel-only one-shot submission proof; refuses before the completed
+     * secure-mode exit fence. No application submission ABI is exposed. */
+    IOReturn verifyScratch();
 };
 #endif

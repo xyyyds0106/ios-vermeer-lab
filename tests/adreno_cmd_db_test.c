@@ -36,6 +36,13 @@ int main(void)
 {
     fixture(1);assert(parse()==AdrenoCmdDbOK && result.complete && result.entries==8 && result.found_mask==255);
     assert(result.resource[AdrenoCmdDbMx].address==0x30020 && result.resource[AdrenoCmdDbCx].aux[3]==0);
+    /* MXC is a separate ARC clock rail; it is never the optional GMxC. */
+    p16(40,3);p16(42,224);p16(44,1024);p16(46,1);p16(48,0x102);
+    memcpy(image+144+224,"mxc.lvl",8);p32(144+224+16,0x30100);p16(144+224+20,8);
+    p16(144+1024+2,64);p16(144+1024+4,128);p16(144+1024+6,256);
+    assert(parse()==AdrenoCmdDbOK && result.complete && result.entries==9 && result.found_mask==511);
+    assert(result.resource[AdrenoCmdDbMxc].address==0x30100 && result.resource[AdrenoCmdDbGmxc].address==0x30030);
+    p32(144+224+16,0x50100);assert(parse()==AdrenoCmdDbUnsupported && !result.complete);
     split_arc_fixture();
     assert(parse()==AdrenoCmdDbOK && result.complete && result.rows==3 && result.entries==8 && result.found_mask==255);
     assert(result.resource[AdrenoCmdDbGfx].version==0x100 && result.resource[AdrenoCmdDbCx].version==0x101);
