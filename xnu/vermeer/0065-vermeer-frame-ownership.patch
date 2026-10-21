@@ -1,0 +1,231 @@
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -45,6 +45,9 @@
+ #include <pexpert/pexpert.h>
+ #include <kern/clock.h>
+ #include <sys/proc.h>
++#include <machine/atomic.h>
++#include "vermeer_frame_policy.h"
++extern "C" void vermeer_debug_frame_register(void (*)(void));
+ 
+ enum {
+ 	kSweetFBGetLayerDefaultSurface  = 3,
+@@ -96,6 +99,7 @@
+ 	OSArray      *fClients;
+ 	uint32_t      fSwapID;
+ 	bool          fConsolePaused;
++	struct vframe_refs fPendingRefs; /* owning refs, transferred with the record */
+ 	uint8_t       fPending[SWEET_FB_SWAP_REC_SIZE];     /* latest swap, not yet shown */
+ 	bool          fDirty;
+ 	uint32_t      fFlushTicks;    /* vsync ticks between panel copies */
+@@ -104,7 +108,7 @@
+ 	void addClient(IOMobileFramebufferUserClient *client);
+ 	void removeClient(IOMobileFramebufferUserClient *client);
+ 	void swap(const uint8_t *rec);
+-	void present(const uint8_t *rec);
++	void present(const uint8_t *rec, const struct vframe_refs *refs);
+ };
+ 
+ OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
+@@ -132,6 +136,23 @@
+ 
+ OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
+ 
++static uint64_t _Atomic vf_submitted, vf_presented, vf_bytes, vf_missing, vf_rejected, vf_ticks;
++static void vermeer_frame_status(void)
++{
++    IOLog("VERMEER FRAME: submits=%llu presents=%llu ticks=%llu backend=cpu-copy gpu=unavailable\n",
++        os_atomic_load(&vf_submitted,relaxed),os_atomic_load(&vf_presented,relaxed),os_atomic_load(&vf_ticks,relaxed));
++    IOLog("VERMEER FRAME: copied-bytes=%llu missing=%llu rejected=%llu\n",
++        os_atomic_load(&vf_bytes,relaxed),os_atomic_load(&vf_missing,relaxed),os_atomic_load(&vf_rejected,relaxed));
++}
++static void vermeer_frame_release(struct vframe_refs *refs)
++{
++    for (unsigned i=0;i<VFRAME_LAYERS;i++) {
++        SweetSurface *surface=(SweetSurface *)refs->slot[i];
++        if (surface) surface->release();
++        refs->slot[i]=NULL;
++    }
++}
++
+ bool
+ AppleCLCD::start(IOService *provider)
+ {
+@@ -158,6 +179,7 @@
+ 	/* Known UIKit layout, centered 1:1 inside the guarded K70 panel. */
+ 	fOffX = (VERMEER_LOGICAL_W - (int32_t)fWidth) / 2;
+ 	fOffY = (VERMEER_LOGICAL_H - (int32_t)fHeight) / 2;
++	bzero(&fPendingRefs,sizeof(fPendingRefs));
+ 	fLock = IOLockAlloc();
+ 	fClients = OSArray::withCapacity(4);
+ 	fSurface = sweet_surface_create_physical(fPhys, fWidth, fHeight, fRowBytes, SWEET_FB_FORMAT_BGRA);
+@@ -183,6 +205,8 @@
+ 	setProperty("external", false);
+ 	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
+ 	registerService();
++	vermeer_debug_frame_register(vermeer_frame_status);
++	IOLog("VERMEER FB: retained pending frame ownership enabled\n");
+ 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u\n",
+ 	    fWidth, fHeight, fRowBytes, fPhys, fSurface->id);
+ 	IOLog("VERMEER FB: logical canvas 1125x2436 centered in 1440x3200\n");
+@@ -195,6 +219,7 @@
+ 	AppleCLCD *fb = (AppleCLCD *)owner;
+ 	uint64_t now = mach_absolute_time();
+ 	uint64_t count = ++fb->fVsyncCount;
++	os_atomic_inc(&vf_ticks,relaxed);
+ 	uint64_t values[6] = {
+ 		(uint32_t)count, (uint32_t)(count >> 32),
+ 		(uint32_t)now, (uint32_t)(now >> 32),
+@@ -209,16 +234,19 @@
+ 	}
+ 	bool flush = fb->fDirty && (count % fb->fFlushTicks) == 0;
+ 	uint8_t *rec = NULL;
++	struct vframe_refs refs = {};
+ 	if (flush) {
+ 		rec = (uint8_t *)IOMallocData(SWEET_FB_SWAP_REC_SIZE);
+ 		if (rec != NULL) {
+ 			memcpy(rec, fb->fPending, SWEET_FB_SWAP_REC_SIZE);
++			vframe_take(&fb->fPendingRefs,&refs);
+ 			fb->fDirty = false;
+ 		}
+ 	}
+ 	IOLockUnlock(fb->fLock);
+ 	if (rec != NULL) {
+-		fb->present(rec);
++		fb->present(rec,&refs);
++		vermeer_frame_release(&refs);
+ 		IOFreeData(rec, SWEET_FB_SWAP_REC_SIZE);
+ 	}
+ 	sender->setTimeoutUS(SWEET_FB_VSYNC_US);
+@@ -264,19 +292,29 @@
+ void
+ AppleCLCD::swap(const uint8_t *rec)
+ {
++    struct vframe_refs incoming={},displaced={};
++    uint32_t mask=get32(rec,0x104);
++    for (unsigned i=0;i<VFRAME_LAYERS;i++) {
++        uint32_t id=get32(rec,0x54+4*i);
++        if ((mask&(1u<<i)) && id) incoming.slot[i]=sweet_surface_copy(id);
++    }
+ 	IOLockLock(fLock);
++    vframe_replace(&fPendingRefs,&incoming,&displaced);
+ 	memcpy(fPending, rec, SWEET_FB_SWAP_REC_SIZE);
+ 	fDirty = true;
+ 	IOLockUnlock(fLock);
++    vermeer_frame_release(&displaced);
++    os_atomic_inc(&vf_submitted,relaxed);
+ 	if ((++sweet_fb_swap_count % 1000) == 0) {
+ 		IOLog("SWEET FB: %llu swaps\n", sweet_fb_swap_count);
+ 	}
+ }
+ 
+ void
+-AppleCLCD::present(const uint8_t *rec)
++AppleCLCD::present(const uint8_t *rec, const struct vframe_refs *refs)
+ {
+ 	uint32_t mask = get32(rec, 0x104);
++	os_atomic_inc(&vf_presented,relaxed);
+ 
+ 
+ 	if (!fConsolePaused) {
+@@ -301,7 +339,7 @@
+ 		if (!(mask & (1u << layer)) || id == 0) {
+ 			continue;
+ 		}
+-		SweetSurface *s = sweet_surface_copy(id);
++		SweetSurface *s = (SweetSurface *)refs->slot[layer];
+ 		if (sweet_fb_swaps_logged < 16) {
+ 			sweet_fb_swaps_logged++;
+ 			IOLog("SWEET FB: swap %u layer %u surface %u %ux%u fmt 0x%x bpr %u a %d,%d %ux%u b %d,%d %dx%d\n",
+@@ -310,52 +348,24 @@
+ 			    get32(a, 12), dx, dy, w, h);
+ 		}
+ 		if (s == NULL || s == fSurface) {
+-			OSSafeReleaseNULL(s);
++            if (!s) os_atomic_inc(&vf_missing,relaxed);
+ 			continue;
+ 		}
+-		uintptr_t src = s->kernelAddress();
+-		uint32_t bpe = s->bytesPerElement ? s->bytesPerElement : 4;
+-		if (w <= 0 || h <= 0) {
+-			w = (int32_t)s->width;
+-			h = (int32_t)s->height;
+-		}
+-		if (sx < 0 || sy < 0) {
+-			sx = sy = 0;
+-		}
+-		if (dx < 0 || dy < 0) {
+-			dx = dy = 0;
+-		}
+-		/* Translate the smaller logical canvas into the centered panel area. */
+-		dx -= fOffX;
+-		dy -= fOffY;
+-		if (dx < 0) { sx -= dx; w += dx; dx = 0; }
+-		if (dy < 0) { sy -= dy; h += dy; dy = 0; }
+-		if (w > (int32_t)s->width - sx) {
+-			w = (int32_t)s->width - sx;
+-		}
+-		if (h > (int32_t)s->height - sy) {
+-			h = (int32_t)s->height - sy;
+-		}
+-		if (w > (int32_t)fWidth - dx) {
+-			w = (int32_t)fWidth - dx;
+-		}
+-		if (h > (int32_t)fHeight - dy) {
+-			h = (int32_t)fHeight - dy;
+-		}
+-		uint64_t last = (uint64_t)s->offset + (uint64_t)(sy + h - 1) * s->bytesPerRow +
+-		    (uint64_t)(sx + w) * 4;
+-		if (w <= 0 || h <= 0 || s->elementWidth != 1 || s->elementHeight != 1 ||
+-		    s->memory == NULL || last > s->memory->getLength()) {
+-			src = 0;
+-		}
+-		if (src != 0 && bpe == 4) {
+-			for (int32_t y = 0; y < h; y++) {
+-				memcpy((void *)(fPixels + (uint64_t)(dy + y) * fRowBytes + (uint64_t)dx * 4),
+-				    (const void *)(src + s->offset + (uint64_t)(sy + y) * s->bytesPerRow + (uint64_t)sx * 4),
+-				    (size_t)w * 4);
+-			}
+-		}
+-		s->release();
++        uintptr_t src=s->kernelAddress();
++        uint32_t bpe=s->bytesPerElement ? s->bytesPerElement : 4;
++        if (w<=0 || h<=0) { w=(int32_t)s->width;h=(int32_t)s->height; }
++        struct vframe_copy copy;
++        if (!src || bpe!=4 || s->elementWidth!=1 || s->elementHeight!=1 || !s->memory ||
++            !vframe_clip(&copy,sx,sy,dx,dy,w,h,s->width,s->height,s->bytesPerRow,
++                s->offset,s->memory->getLength(),fWidth,fHeight,fRowBytes,
++                (uint64_t)fRowBytes*fHeight,-fOffX,-fOffY)) {
++            os_atomic_inc(&vf_rejected,relaxed);continue;
++        }
++        for (uint32_t y=0;y<copy.rows;y++) {
++            memcpy((void *)(fPixels+copy.dst+(uint64_t)y*fRowBytes),
++                   (const void *)(src+copy.src+(uint64_t)y*s->bytesPerRow),copy.bytes);
++        }
++        os_atomic_add(&vf_bytes,(uint64_t)copy.bytes*copy.rows,relaxed);
+ 	}
+ }
+ 
+--- a/iokit/Kernel/arm/hid/SweetHID.cpp
++++ b/iokit/Kernel/arm/hid/SweetHID.cpp
+@@ -432,9 +432,12 @@
+ 	return true;
+ }
+ 
++extern "C" void vermeer_debug_input_record(int);
++
+ void
+ SweetHIDTouch::touch(int finger, bool down, int x, int y)
+ {
++	vermeer_debug_input_record(0);
+ 	uint64_t now = mach_absolute_time();
+ 	IOHIDEvent *collection;
+ 	bool any = false;
+@@ -517,6 +520,7 @@
+ 		IOLog("SWEET HID: touch %d %s at %d,%d\n", finger, down ? "down" : "up", x, y);
+ 	}
+ 	dispatchEvent(collection);
++	vermeer_debug_input_record(1);
+ 	collection->release();
+ }
+ 

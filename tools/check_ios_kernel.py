@@ -15,6 +15,8 @@ if '--gui' in sys.argv:
                  b'SWEET HID: touch registered', b'SWEET HID: buttons registered',
                  b'SWEET Sandbox: permissive policy', b'VERMEER FB: geometry guard',
                  b'VERMEER FB: first present; muting panel text only',
+                 b'VERMEER FB: retained pending frame ownership enabled',
+                 b'VERMEER FRAME: submits=', b'VERMEER INPUT: touch-calls=',
                  b'VERMEER FB: logical canvas 1125x2436 centered in 1440x3200',
                  b'VERMEER SAMPLE: read-only dyld maps and USB requests enabled',
                  b'IMG %s[%d] base', b'selected tasks only')

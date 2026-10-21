@@ -26,6 +26,15 @@ Commands, each followed by a newline:
 - `replay`: replay the retained RAM log
 - `sample`: queue a read-only snapshot of the GUI sampler's boot-selected
   processes, or report unavailable if disabled/the40-snapshot limit is reached
+- `frame` (GUI009): submitted/presented frame counts, vsync activity, copied
+  bytes and missing/rejected surfaces; reports the current CPU copy backend
+- `input` (GUI009): touch entry and HID dispatch counts; these are observations,
+  not a touch injection command or proof of a physical controller driver
+
+`-ObserveFrames` makes the capture tool query `frame`/`input` every ten seconds
+while continuing to collect logs on the same serial connection. Both callbacks
+read counters only; they do not take a display/HID lock or access hardware.
+The new counters still require GUI009 real-device validation.
 
 The GUI007 sampler records saved user thread stacks and bounded dyld64 private
 image paths/bases, allowing migration-plugin addresses to be symbolicated.
@@ -36,7 +45,9 @@ The host cannot supply addresses, task names or read sizes. Image enumeration
 uses fault-safe reads, at most4096entries/64private rows and159path bytes per
 row; a changing image list is marked best effort. The shared cache uses its
 separately recorded slide. Stack lines are split into four-frame chunks so the
-console formatter retains line boundaries. GUI007 hardware validation is pending.
+console formatter retains line boundaries. GUI007 and GUI008 pass manual USB
+sampling and post-sample ping on the test handset, including GUI008 after the
+user reports a frozen picture.
 
 No shell, arbitrary memory access, storage operations or reboot commands are exposed.
 This is log transport and bounded queries, not an interactive kernel debugger.

@@ -2,6 +2,24 @@
 
 Experimental bring-up for Redmi K70 (vermeer / SM8550).
 
+GUI008 (`fd9878b`, Actions39554200501) temporarily boots the retained root;
+the user confirms reaching Hello/the setup interface. The clean-root migration
+baseline returns success and repeated snapshots show SpringBoard entering
+UIApplicationMain's event loop. Touch does not work reliably: the user reports
+the picture stops changing after a finger swipe. USB ping and queued snapshots
+still work in that state. This is a visible setup milestone; hardware touch,
+stable transitions and Adreno/Metal acceleration are not yet demonstrated.
+
+The GUI009 candidate fixes a display-buffer lifetime gap: pending swaps retain
+their surfaces until the delayed panel copy, including when userspace releases
+them or a newer frame supersedes them. Signed scrolling rectangles are clipped
+against both source storage and the panel without resetting unrelated axes.
+Host tests exercise release-before-present, replacement during a copy and
+200,000 clipped-copy cases. Read-only `frame`/`input` counters distinguish
+submission, panel copy and HID dispatch. These changes do not register a GPU or
+a physical touch controller. Local affected-source compiles and host checks
+pass; the complete build and real-device result are pending.
+
 GUI007 (`a6a6ddb`, Actions39549812373) boots with continued display swaps and
 passes read-only USB manual sampling, image maps and post-sample liveness.
 The same-kernel007i variant adds installer services to the selected task list.
@@ -9,7 +27,7 @@ Real stacks identify SystemAppMigrator waiting for app-store/installation
 completion while appstored also waits in DataMigration. The reference root
 tweaks document this clean-root upgrade-migration delay as well.
 
-The next opt-in repair, `vermeer_migration_baseline=1`, initializes only the
+The opt-in repair, `vermeer_migration_baseline=1`, initializes only the
 20H392 migration-version preference on the disposable root. It stages/syncs a
 complete plist, preserves an existing preference inode in an exclusive hidden
 backup, publishes with an exclusive rename, and records a one-time marker.
@@ -19,7 +37,7 @@ every transaction step, interrupted recovery and repeated invocation. Root
 UUID/extent checks remain prerequisites; the actual SystemVersion must match
 16.7.16/20H392. This is a laboratory bootstrap, not evidence that Apple's
 migration plugins completed. Setup and activation records are not modified.
-Full build and real-device validation of this repair remain pending.
+The full build and application of the baseline have passed on the test handset.
 
 GUI006s reuses the verified GUI006 kernel with selected-process sampling.
 Repeated symbolicated snapshots show SpringBoard waiting for the system-shell

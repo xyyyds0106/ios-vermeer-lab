@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as folder:
     all_patches=''.join(p.read_text(errors='surrogateescape') for p in profile.glob('*.patch'))
     assert '+++ b/bsd/dev/sweet_ufs.c' not in all_patches
     assert 'SWEETLOG' not in all_patches
-    for name in ('0046-','0050-','0058-','0059-','0060-','0061-','0062-','0063-','0064-','0068-'):
+    for name in ('0046-','0050-','0058-','0059-','0060-','0061-','0062-','0063-','0064-','0065-','0066-','0068-'):
         assert any(p.name.startswith(name) for p in profile.iterdir())
     firmware=mkvermeeradt.node('device-tree',children=[mkvermeeradt.node('product',[
         ('product-name',b'iPhone\0')])])

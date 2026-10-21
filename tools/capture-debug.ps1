@@ -2,7 +2,8 @@ param(
     [ValidateRange(1,86400)][int]$Seconds = 600,
     [string]$Port,
     [string]$LogPath = (Join-Path $PSScriptRoot '..\..\device-audit\live-ios-004.log'),
-    [ValidateSet('help','status','ping','replay','sample')][string]$Command = 'status',
+    [ValidateSet('help','status','ping','replay','sample','frame','input')][string]$Command = 'status',
+    [switch]$ObserveFrames,
     [switch]$ListOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -49,7 +50,12 @@ try {
     $serial.Write($Command + "`n")
     $buffer = [byte[]]::new(16384)
     $part = 0
+    $nextFrameQuery = [DateTime]::UtcNow
     while ([DateTime]::UtcNow -lt $deadline) {
+        if ($ObserveFrames -and [DateTime]::UtcNow -ge $nextFrameQuery) {
+            $serial.Write("frame`ninput`n")
+            $nextFrameQuery = [DateTime]::UtcNow.AddSeconds(10)
+        }
         try { $n = $serial.Read($buffer,0,$buffer.Length) }
         catch [System.TimeoutException] { continue }
         if ($n -le 0) { continue }

@@ -24,6 +24,8 @@ extern unsigned vermeer_debug_copy(uint64_t *, char *, unsigned);
 extern uint64_t vermeer_debug_total(void);
 extern uint64_t vermeer_debug_dropped(void);
 extern int vermeer_debug_sample_request(void);
+extern int vermeer_debug_frame_request(void);
+extern void vermeer_debug_input_status(void);
 void vermeer_usb_debug_start(void);
 
 #define GCTL 0xc110
@@ -238,7 +240,7 @@ static void handle_setup(void)
     case VUSB_CONTROL:
         if (u.configured) {
             bool old=u.dtr;u.dtr=(value&1)!=0;u.notify=true;
-            if (u.dtr && !old) printf("VERMEER USB: debug connected; help/status/ping/replay/sample (read only)\n");
+            if (u.dtr && !old) printf("VERMEER USB: debug connected; help/status/ping/replay/sample/frame/input (read only)\n");
         }break;
     case VUSB_BREAK:break;
     case VUSB_CLEAR_HALT:
@@ -267,7 +269,11 @@ static void command_line(void)
     } else if (!strcmp(u.command,"sample")) {
         printf("VERMEER DEBUG: sample %s\n",vermeer_debug_sample_request() ?
             "queued (coalesced; selected tasks only)" : "unavailable (disabled or limit reached)");
-    } else if (u.command_n) printf("VERMEER DEBUG: commands help status ping replay sample; queries only\n");
+    } else if (!strcmp(u.command,"frame")) {
+        if (!vermeer_debug_frame_request()) printf("VERMEER FRAME: unavailable\n");
+    } else if (!strcmp(u.command,"input")) {
+        vermeer_debug_input_status();
+    } else if (u.command_n) printf("VERMEER DEBUG: commands help status ping replay sample frame input; queries only\n");
     u.command_n=0;u.command_overflow=false;
 }
 static void receive_done(unsigned length)
