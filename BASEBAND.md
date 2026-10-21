@@ -5,6 +5,12 @@ targeting China Mobile, China Unicom, China Telecom and China Broadnet. No
 carrier has passed a test yet. Camera, general-purpose buttons and Bluetooth
 are separate work; call audio and IMS remain dependencies of usable voice calls.
 
+The user now requests automatic logs and software return to Fastboot. See
+[observable diagnostics](BASEBAND-OBSERVABILITY.md) for the offline record
+implementation, existing CDC limits and unverified reset/retention prerequisites.
+GPU/touch is the sole device I/O owner. Do not request photographs or button
+presses as the default workflow, or repeat the framebuffer-only probe.
+
 ## Current result
 
 This is a protocol/inventory foundation with a first hardware diagnostic result
@@ -111,8 +117,11 @@ a hardware abort instead uses the stop screen. The older offline full-snapshot
 decoder retains its separate return codes and is not used for hardware reads.
 After the user supplied another temporary-boot confirmation and the coordinator
 released a device slot, one temporary013 boot returned success (0.191s total).
-The confirmation is consumed. Screen evidence is pending; Fastboot acceptance
-does not prove execution or metadata readability. Device operations remain
+The confirmation is consumed. Execution/result remains unknown; Fastboot acceptance
+does not prove execution or metadata readability. No013 machine-readable result
+was captured, and the later photograph is byte-identical to012's old image.
+013 has no CDC export or persistent result and ordinary PSCI reset does not
+select Fastboot. Device operations remain
 coordinated with the GPU/touch lane and must not race each other.
 
 ## Validation and continuation
