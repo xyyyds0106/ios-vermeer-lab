@@ -9,6 +9,8 @@ struct fake {
     unsigned noirq,incomplete,allones,noidle,triggered,finish_count,finish_mode;
     unsigned qualify_rev,qualify_db,begins,begin_fail;
     unsigned delayed,pending_tcs,stuck_write,change_id;
+    unsigned revoke_settle,late_settle,settle;
+    uint64_t first_trigger;
     uint64_t ready_at;
     uint32_t addr[2],write_off[128],write_val[128];
     struct vrw_native_state *state;
@@ -25,6 +27,8 @@ static uint64_t time_us(void *p){return ((struct fake *)p)->now;}
 static void wait_us(void *p,unsigned n)
 {
     ((struct fake *)p)->now+=n;
+    if(n>1 && f.revoke_settle)f.proof=0;
+    if(n>1 && f.late_settle)f.now+=300000;
     if(f.delayed && f.pending_tcs<3 && f.now>=f.ready_at) {
         unsigned b=0xd00+f.pending_tcs*0x2a0;
         f.r[0xd04/4]|=1u<<f.pending_tcs;f.r[(b+first()+8)/4]=1;
@@ -56,6 +60,7 @@ static int wr(void *p,uint32_t off,uint32_t value)
     else if(f.stuck_write!=f.writes)f.r[off/4]=value;
     for(unsigned t=0;t<3;t++)if(off==0xd00+t*0x2a0+first()+4 && value==(VRW_AMC|VRW_TRIGGER)) {
         unsigned rail=f.triggered++;assert(rail<2);
+        if(!rail)f.first_trigger=f.now;else assert(f.now-f.first_trigger>=f.settle);
         unsigned b=0xd00+t*0x2a0;
         for(unsigned c=0;c<3;c++) {
             unsigned cmd=b+msg()+c*stride();
@@ -81,7 +86,7 @@ static void finish(void *p,unsigned mode){(void)p;++f.finish_count;f.finish_mode
 static int begin(void *p,struct vrw_native_lease *l)
 {
     (void)p;++f.begins;if(f.begin_fail)return 0;
-    *l=(struct vrw_native_lease){{&f,bits,epoch,time_us,rd,wr,wait_us},
+    *l=(struct vrw_native_lease){{&f,bits,epoch,time_us,rd,wr,wait_us,f.settle},
         VRP_RSC_BASE,VRP_RSC_BYTES,VRP_DB_BASE,VRP_DB_BYTES,f.generation,
         dbread,record,finish};
     return 1;
@@ -91,6 +96,7 @@ static void reset(unsigned rev)
     memset(&f,0,sizeof(f));f.proof=VRW_REQUIRED;f.generation=11;f.rev=rev;
     f.qualify_rev=rev;f.qualify_db=1;f.now=100;
     f.pending_tcs=99;
+    f.settle=18000; /* synthetic board-policy fixture, not a K70 qualification */
     f.addr[0]=0x40200;f.addr[1]=0x40100;
     f.r[0]=(rev>>8)<<16|(rev&255)<<8;f.r[3]=(16u<<27)|(8u<<12);
     f.r[0xd00/4]=0xab;
@@ -134,6 +140,7 @@ static void guards(void)
     }
     reset(0x300);f.r[0]=0;assert(run(&s)==VRW_LAYOUT && !f.writes && !f.dbreads);
     reset(0x300);p32(f.db,2);assert(run(&s)==VRW_GATED && !f.writes && f.dbreads==1);
+    reset(0x300);f.settle=50001;assert(run(&s)==VRW_GATED && !f.writes && !f.reads);
     reset(0x300);f.db[144]='x';assert(run(&s)==VRW_GATED && !f.writes && f.reads==3);
     reset(0x300);p32(f.db+184,0x40104);assert(run(&s)==VRW_LAYOUT && !f.writes);
     reset(0x300);f.r[0]=0x40000;assert(run(&s)==VRW_LAYOUT && !f.writes);
@@ -156,6 +163,10 @@ static void failures(void)
     }
     reset(0x300);f.stuck_write=2;
     assert(run(&s)==VRW_VERIFY && f.writes==2 && s.executor.poisoned && f.finish_mode==VRW_QUARANTINE);
+    reset(0x300);f.revoke_settle=1;
+    assert(run(&s)==VRW_REVOKED && f.triggered==1 && s.executor.completed_rails==1 && s.executor.poisoned);
+    reset(0x300);f.late_settle=1;
+    assert(run(&s)==VRW_TIMEOUT && f.triggered==1 && s.executor.completed_rails==1 && s.executor.poisoned);
     for(unsigned i=1;i<=reads;i++) {
         reset(0x300);f.failread=i;
         assert(run(&s)==VRW_IO && f.reads==i && f.finish_mode==VRW_QUARANTINE);

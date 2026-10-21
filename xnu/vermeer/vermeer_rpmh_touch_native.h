@@ -8,7 +8,7 @@
 #include "vermeer_rpmh_touch_power.h"
 enum { VRW_RELEASE_CLEAN=0,VRW_KEEP_TOUCH_IDLE_HOLD=1,VRW_QUARANTINE=2 };
 struct vrw_native_lease {
-    struct vrw_io io;
+    struct vrw_io io; /* iovdd_settle_us is reviewed board policy, not guessed */
     uint64_t rsc_start,rsc_bytes,db_start,db_bytes;
     uint64_t generation;
     int (*read_db)(void *,uint32_t offset,uint32_t bytes,uint8_t *);
@@ -75,6 +75,7 @@ static inline unsigned vrw_native_touch_init(struct vrw_native_state *s,const st
     struct vrw_native_lease *l=&c.lease;struct vrw_io *io=&l->io;
     if(!l->finish)return s->status; /* broken provider owns its unreturned lease */
     if(!io->proof || !io->epoch || !io->now_us || !io->read32 || !io->write32 || !io->wait_us ||
+       io->iovdd_settle_us>50000 ||
        !l->read_db || !l->record || !l->generation || l->rsc_start!=VRP_RSC_BASE ||
        l->rsc_bytes!=VRP_RSC_BYTES || l->db_start!=VRP_DB_BASE || l->db_bytes!=VRP_DB_BYTES ||
        !vrw_native_proof(&c))goto finish;
@@ -104,7 +105,7 @@ static inline unsigned vrw_native_touch_init(struct vrw_native_state *s,const st
      * pins io.epoch again but may not silently accept a replaced lease. */
     if(!vrw_native_proof(&c)){s->status=VRW_REVOKED;s->disposition=VRW_QUARANTINE;goto finish;}
     struct vrw_io bounded={&c,vrw_native_proof,vrw_native_epoch,vrw_native_clock,
-        vrw_native_read32,vrw_native_write32,vrw_native_wait};
+        vrw_native_read32,vrw_native_write32,vrw_native_wait,io->iovdd_settle_us};
     s->status=vrw_touch_enable(&s->executor,&bounded,&s->db,revision);
     if(s->executor.poisoned || s->status==VRW_IO || s->status==VRW_REVOKED)s->disposition=VRW_QUARANTINE;
     else if(s->status==VRW_OK)s->disposition=VRW_KEEP_TOUCH_IDLE_HOLD;

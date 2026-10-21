@@ -18,7 +18,7 @@
 enum { VRW_OK=0,VRW_GATED,VRW_ARGUMENT,VRW_REUSED,VRW_REVOKED,VRW_CLOCK,
        VRW_TIMEOUT,VRW_IO,VRW_CONFLICT,VRW_NO_SLOT,VRW_LAYOUT,VRW_VERIFY };
 enum { VRW_NEW=0,VRW_PREFLIGHT,VRW_SELECT,VRW_MASK,VRW_PROGRAM,VRW_FIRE,
-       VRW_WAIT,VRW_CLEANUP,VRW_DONE,VRW_STOPPED };
+       VRW_WAIT,VRW_CLEANUP,VRW_DONE,VRW_STOPPED,VRW_SETTLE };
 struct vrw_io {
     void *ctx;
     unsigned (*proof)(void *);
@@ -27,6 +27,7 @@ struct vrw_io {
     int (*read32)(void *,uint32_t offset,uint32_t *);
     int (*write32)(void *,uint32_t offset,uint32_t);
     void (*wait_us)(void *,unsigned); /* bounded thread-context delay, no I/O */
+    unsigned iovdd_settle_us; /* platform-qualified sequence delay, <=50000 */
     /* I/O is relative to retained DRV2 mapping. Read/write callbacks must be
      * ordered, fault-contained and bounded; clocks cannot preempt a hung bus. */
 };
@@ -188,7 +189,8 @@ static inline unsigned vrw_touch_enable(struct vrw_state *s,const struct vrw_io 
     if(s->used)return VRW_REUSED;
     s->used=1;s->phase=VRW_PREFLIGHT;s->selected=UINT32_MAX;
     if(!access || !access->proof || !access->epoch || !access->now_us ||
-       !access->read32 || !access->write32 || !access->wait_us || !db || !db->complete || db->status ||
+       !access->read32 || !access->write32 || !access->wait_us || access->iovdd_settle_us>50000 ||
+       !db || !db->complete || db->status ||
        db->db_version!=1 || db->db_valid!=3 || (db->db_flags&1u) ||
        !db->resource[0].valid || !db->resource[1].valid ||
        (qualified_revision!=0x207 && qualified_revision!=0x300)) {
@@ -215,7 +217,15 @@ static inline unsigned vrw_touch_enable(struct vrw_state *s,const struct vrw_io 
     }
     s->first=qualified_revision==0x300?0x20:0x10;
     s->stride=qualified_revision==0x300?24:20;s->msg=qualified_revision==0x300?0x34:0x30;
-    for(s->rail=0;s->rail<2;s->rail++)if(!vrw_rail(s,&io))return s->status;
+    for(s->rail=0;s->rail<2;s->rail++) {
+        if(!vrw_rail(s,&io))return s->status;
+        if(s->rail==0 && io.iovdd_settle_us) {
+            s->phase=VRW_SETTLE;
+            if(!vrw_ready(s,&io))return s->status;
+            io.wait_us(io.ctx,io.iovdd_settle_us);
+            if(!vrw_ready(s,&io))return s->status;
+        }
+    }
     s->poisoned=0;s->status=VRW_OK;s->phase=VRW_DONE;return VRW_OK;
 }
 #endif
