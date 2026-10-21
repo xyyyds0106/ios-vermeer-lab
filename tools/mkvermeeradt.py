@@ -19,7 +19,9 @@ def node(name, props=(), children=()):
     result.children = list(children)
     return result
 
-def build(highram=False, ios=False):
+def build(highram=False, ios=False, gui=False, product_adt=None):
+    if gui and not ios:
+        raise ValueError('GUI device tree requires the iOS profile')
     # Probe011 verified sparse access to exactly this additional window.
     phys, size = (0x8c0000000, 0x80000000) if highram else (0xc0000000, 0x10000000)
     cpu = node('cpu0', [
@@ -72,6 +74,37 @@ def build(highram=False, ios=False):
         ]))
         defaults = next(c for c in result.children if c.name == 'defaults')
         defaults.props.append(('no-effaceable-storage', 0, u32(1)))
+    if gui:
+        if product_adt is None:
+            raise ValueError('GUI profile requires the locally extracted D22AP product ADT')
+        firmware_tree, _ = adt.parse(Path(product_adt).read_bytes())
+        product = next(c for c in firmware_tree.children if c.name == 'product')
+        # Generic firmware product description only; skip syscfg placeholders.
+        product_props = [(k, v) for k, flags, v in product.props
+                         if not flags and k not in ('name', 'AAPL,phandle')]
+        result.children.append(node('product', product_props))
+        identity = {
+            'compatible': string('D22AP') + string('iPhone10,3') + string('xiaomi,vermeer') +
+                          string('xiaomi,sweet') + string('qcom,sm8550') + string('AppleARM'),
+            'model': string('iPhone10,3'), 'target-type': string('D22'),
+        }
+        result.props = [(k, flags, identity.get(k, v)) for k, flags, v in result.props]
+        result.props += [('target-sub-type', 0, string('D22AP')),
+                         ('physical-model', 0, string('Redmi K70'))]
+        # A nonzero supported scale prevents an invalid infinite FBS mode.
+        # Keep the reference iOS16 @3x behavior; the physical framebuffer remains
+        # the observed1440x3200 K70 buffer, never the iPhone's memory layout.
+        chosen.props += [('display-scale', 0, u32(3)), ('display-rotation', 0, u32(0)),
+                         ('unique-chip-id', 0, u64(0x5645524d45455201)),
+                         ('chip-id', 0, u32(0x8015))]
+        armio = next(c for c in result.children if c.name == 'arm-io')
+        armio.children += [node('wdt', [('no-pmu', u32(1))]),
+                          node('disp0', [('device_type', string('display-subsystem')),
+                                         ('compatible', string('sweet,display')),
+                                         ('canvas-width', u32(1440)), ('canvas-height', u32(3200))])]
+        result.children.append(node('buttons', [
+            ('button-names', string('volup') + string('voldown') + string('hold')),
+            ('home-button-type', u32(2)), ('opposed-power-vol-buttons', u32(1))]))
     return result
 
 if __name__ == '__main__':
@@ -79,8 +112,10 @@ if __name__ == '__main__':
     parser.add_argument('out')
     parser.add_argument('--highram', action='store_true', help='probe011 window: 8c0000000..940000000, 2GiB; UFS DMA not validated here')
     parser.add_argument('--ios', action='store_true', help='experimental iOS root boot manifest/defaults; no device calibration changes')
+    parser.add_argument('--ios-gui', action='store_true', help='iOS display/HID compatibility description, real K70 framebuffer')
+    parser.add_argument('--product-adt', help='local generic D22AP ADT extracted from the existing IPSW; never committed')
     args = parser.parse_args()
-    tree = build(args.highram, args.ios)
+    tree = build(args.highram, args.ios or args.ios_gui, args.ios_gui, args.product_adt)
     blob = adt.serialize(tree)
     parsed, used = adt.parse(blob)
     assert used == len(blob)

@@ -9,6 +9,10 @@ required = (
     b'CRASH %s reason', b'VERMEER ROOT: first-boot test systembag prepared',
     b'VERMEER USB: CDC ACM debug004', b'K70DBG004',
 )
+if '--gui' in sys.argv:
+    required += (b'IOMobileFramebufferUserClient', b'IOCoreSurfaceRoot',
+                 b'SWEET HID: touch registered', b'SWEET HID: buttons registered',
+                 b'SWEET Sandbox: permissive policy', b'VERMEER FB: geometry guard')
 missing = [s.decode() for s in required if s not in data]
 if missing:
     raise SystemExit('Integrated kernel missing required services: ' + ', '.join(missing))

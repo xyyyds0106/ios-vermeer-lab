@@ -9,7 +9,7 @@ on:
       profile:
         description: reference reproduces upstream; vermeer-early has no storage drivers
         type: choice
-        options: [vermeer-early, vermeer-ramroot, vermeer-ufs-probe, vermeer-hfs-ramroot, vermeer-ufs-block, vermeer-ios, reference]
+        options: [vermeer-early, vermeer-ramroot, vermeer-ufs-probe, vermeer-hfs-ramroot, vermeer-ufs-block, vermeer-ios, vermeer-ios-gui, reference]
         default: vermeer-early
       macos_version:
         description: macOS release whose xnu to build (13.5 = xnu-8796, iOS 16 era)
@@ -54,6 +54,7 @@ jobs:
             clang -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g "tests/${test}_test.c" -o "host-test/$test"
             "host-test/$test"
           done
+          python3 tests/gui_profile_test.py
 
       - name: Fetch build script
         run: |
@@ -79,6 +80,9 @@ jobs:
             cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
           elif [ "$PROFILE" = vermeer-ios ]; then
             python3 tools/prepare_vermeer.py xnu/patches .ci-patches --ios
+            cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
+          elif [ "$PROFILE" = vermeer-ios-gui ]; then
+            python3 tools/prepare_vermeer.py xnu/patches .ci-patches --ios-gui
             cp .ci-patches/*.patch .ci-patches/*.sh dxb/patches/
           elif [ "$PROFILE" = reference ]; then
             cp xnu/patches/*.patch xnu/patches/*.sh dxb/patches/
@@ -134,8 +138,13 @@ jobs:
           (cd out && shasum -a 256 vermeer-init > INIT_SHA256)
 
       - name: Verify required integrated services in the actual kernel
-        if: ${{ success() && env.PROFILE == 'vermeer-ios' }}
-        run: python3 tools/check_ios_kernel.py dxb/fakeroot/System/Library/Kernels/kernel.development.sweet
+        if: ${{ success() && (env.PROFILE == 'vermeer-ios' || env.PROFILE == 'vermeer-ios-gui') }}
+        run: |
+          if [ "$PROFILE" = vermeer-ios-gui ]; then
+            python3 tools/check_ios_kernel.py dxb/fakeroot/System/Library/Kernels/kernel.development.sweet --gui
+          else
+            python3 tools/check_ios_kernel.py dxb/fakeroot/System/Library/Kernels/kernel.development.sweet
+          fi
 
       - name: Package build tree for local compiles
         if: always()

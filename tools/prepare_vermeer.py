@@ -13,12 +13,13 @@ import sys
 import difflib
 
 source, target = map(Path, sys.argv[1:3])
-ios = '--ios' in sys.argv[3:]
+gui = '--ios-gui' in sys.argv[3:]
+ios = '--ios' in sys.argv[3:] or gui
 ufs_block = '--ufs-block' in sys.argv[3:] or ios
 hfs_ramroot = '--hfs-ramroot' in sys.argv[3:] or ufs_block
 ufs_probe = '--ufs-probe' in sys.argv[3:] or hfs_ramroot
 ramroot = '--ramroot' in sys.argv[3:] or ufs_probe
-last_patch = 45 if ios else (27 if hfs_ramroot else (25 if ramroot else 18))
+last_patch = 59 if gui else (45 if ios else (27 if hfs_ramroot else (25 if ramroot else 18)))
 target.mkdir(parents=True, exist_ok=True)
 if any(target.iterdir()):
     raise SystemExit('Destination must be empty')
@@ -26,10 +27,12 @@ patches = sorted(p for p in source.glob('*.patch') if int(p.name[:4]) <= last_pa
 assert len(patches) == last_patch, 'Incomplete reference patch series'
 if ios:
     # Replace the Sweet UFS transport entirely with the guarded K70 driver.
-    patches = [p for p in patches if int(p.name[:4]) not in (28, 30, 34)]
+    patches = [p for p in patches if int(p.name[:4]) not in (28, 30, 34, 47)]
 counts = {'framebuffer': 0, 'width': 0, 'height': 0, 'stride': 0, 'marker': 0, 'timer': 0}
 for patch in patches:
-    text = patch.read_text()
+    # Some original Apple HID header comments contain legacy byte encodings.
+    # Preserve those bytes exactly while editing ASCII patch context.
+    text = patch.read_text(errors='surrogateescape')
     if int(patch.name[:4]) > 20:
         # 0020-vermeer already changed the CPU personality. git apply checks
         # every context line atomically: leaving the reference name in0038
@@ -39,6 +42,22 @@ for patch in patches:
         # Retain writable-root selection, but never bypass dirty nonjournaled
         # HFS rejection. Integrated root requires a journaled HFSX header.
         text = text.split('--- a/bsd/sweet_hfs/')[0]
+    if gui and patch.name.startswith('0054-'):
+        # The reference sampler is started by its UFS/persistent-log driver.
+        # Keep only generic sampler/trace code. Our0060 supplies the hook;
+        # no reference storage source or partition-tail writes are included.
+        text = ''.join(section for section in re.split(r'(?=^--- (?:a/|/dev/null))', text, flags=re.M)
+                       if not section.startswith(('--- a/bsd/conf/files', '--- a/bsd/dev/sweet_ufs.c')))
+    if gui and patch.name.startswith('0046-'):
+        text = text.replace('#define SWEET_FB_DOT_PITCH              395',
+                            '#define SWEET_FB_DOT_PITCH              526')
+        text = text.replace('/* ppi, 6.67" 1080x2400 */', '/* K70 panel density */')
+    if gui and patch.name.startswith('0058-'):
+        for old, new in [('x > 1079 ? 1079', 'x > 1439 ? 1439'),
+                         ('y > 2399 ? 2399', 'y > 3199 ? 3199'),
+                         (' / 1080)', ' / 1440)'), (' / 2400)', ' / 3200)')]:
+            assert text.count(old) == 1, old
+            text = text.replace(old, new)
     for key, old, new in (
         ('framebuffer', '0x9c000000', '0xb8000000'),
         ('width', '1080u', '1440u'),
@@ -50,7 +69,7 @@ for patch in patches:
         text = text.replace(old, new)
     text, n = re.subn(r'(\+\s*#define SWEET_VTIMER_INTID\s+)19\b', r'\g<1>27', text)
     counts['timer'] += n
-    (target / patch.name).write_text(text)
+    (target / patch.name).write_text(text, errors='surrogateescape')
 assert counts == {'framebuffer': 6, 'width': 2, 'height': 2, 'stride': 4, 'marker': 1, 'timer': 1}, counts
 extras = ('0019-vermeer-early-io-budget.patch', '0020-vermeer-boot-cpu-match.patch')
 if ufs_probe:
@@ -88,6 +107,9 @@ if ios:
                     target / '0023-vermeer-ios-bootstrap.patch')
     shutil.copyfile(source.parent / 'vermeer/0024-vermeer-usb-debug-hook.patch',
                     target / '0024-vermeer-usb-debug-hook.patch')
+if gui:
+    shutil.copyfile(source.parent / 'vermeer/0060-vermeer-gui-guards.patch',
+                    target / '0060-vermeer-gui-guards.patch')
 if ramroot:
     stages = sorted(p for p in source.glob('*.sh') if int(p.name[:4]) <= last_patch)
     assert len(stages) == (3 if hfs_ramroot else 2), 'Unexpected staging scripts'

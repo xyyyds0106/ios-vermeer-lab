@@ -1,0 +1,62 @@
+--- a/bsd/conf/files
++++ b/bsd/conf/files
+@@ -107,6 +107,7 @@
+ bsd/dev/vermeer_ios_bootstrap.c		standard
+ bsd/dev/vermeer_debug.c			standard
+ bsd/dev/vermeer_usb_debug.c		standard
++bsd/dev/sweet_sample.c			standard
+ bsd/dev/memdev.c			standard
+ bsd/dev/mem.c				standard
+ bsd/dev/munge.c 			optional config_requires_u32_munging
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -1104,6 +1104,8 @@
+ 	if (prepare_error) panic("VERMEER ROOT: first-boot preparation failed: %d", prepare_error);
+ 	extern void vermeer_usb_debug_start(void);
+ 	vermeer_usb_debug_start();
++	extern void sweet_sample_start(void);
++	sweet_sample_start();
+ #endif
+ 
+ 	load_init_program(p);
+--- a/iokit/Kernel/arm/SweetFramebuffer.cpp
++++ b/iokit/Kernel/arm/SweetFramebuffer.cpp
+@@ -140,6 +140,12 @@
+ 	fWidth = (uint32_t)video.v_width;
+ 	fHeight = (uint32_t)video.v_height;
+ 	fRowBytes = (uint32_t)video.v_rowBytes;
++	/* Only the independently observed K70 framebuffer reservation. */
++	if (fPhys != 0xb8000000ULL || fWidth != 1440 || fHeight != 3200 || fRowBytes != 5760) {
++		IOLog("VERMEER FB: geometry guard refused\n");
++		return false;
++	}
++	IOLog("VERMEER FB: geometry guard PASS\n");
+ 	if (fPhys == 0 || fWidth == 0 || fHeight == 0 || fRowBytes < fWidth * 4) {
+ 		IOLog("SWEET FB: no boot framebuffer\n");
+ 		return false;
+--- a/bsd/dev/sweet_sample.c
++++ b/bsd/dev/sweet_sample.c
+@@ -18,6 +18,7 @@
+ #include <sys/proc_internal.h>
+ #include <kern/task.h>
+ #include <kern/thread.h>
++#include <mach/thread_act.h>
+ #include <pexpert/pexpert.h>
+ 
+ extern task_t proc_task(proc_t);
+@@ -68,6 +69,7 @@
+ 		strlcpy(sweet_sample_names, "SpringBoard,backboardd", sizeof(sweet_sample_names));
+ 	}
+ 	if (sweet_sample_names[0] == '-') {
++		thread_terminate(current_thread());
+ 		return;
+ 	}
+ 	(void)tsleep(&chan, PZERO, "sweetsmp", 90 * hz);
+@@ -76,6 +78,7 @@
+ 		proc_iterate(PROC_ALLPROCLIST, sweet_sample_proc, NULL, NULL, NULL);
+ 		(void)tsleep(&chan, PZERO, "sweetsmp", 120 * hz);
+ 	}
++	thread_terminate(current_thread());
+ }
+ 
+ void
