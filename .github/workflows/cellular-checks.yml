@@ -1,0 +1,33 @@
+name: Cellular protocol host checks
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/cellular-checks.yml'
+      - 'xnu/vermeer/cellular/**'
+      - 'xnu/vermeer/vermeer_baseband*'
+      - 'tests/cellular/**'
+      - 'tests/*baseband*'
+      - 'tools/baseband*'
+  pull_request:
+    paths:
+      - '.github/workflows/cellular-checks.yml'
+      - 'xnu/vermeer/cellular/**'
+      - 'xnu/vermeer/vermeer_baseband*'
+      - 'tests/cellular/**'
+      - 'tests/*baseband*'
+      - 'tools/baseband*'
+permissions:
+  contents: read
+jobs:
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+      - name: Baseband records and lifecycle
+        run: sh tests/run-baseband-record-tests.sh
+      - name: Synthetic cellular and QRTR protocol regressions
+        run: sh tests/cellular/run-cellular-tests.sh

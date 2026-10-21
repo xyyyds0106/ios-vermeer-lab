@@ -10,6 +10,7 @@ on:
       - xnu/vermeer/vermeer_media_tlmm.h
       - xnu/vermeer/vermeer_media_probe.h
       - xnu/vermeer/vermeer_media_probe.c
+      - xnu/vermeer/media/**
       - tools/media_inventory.py
       - tests/bt_h4_test.c
       - tests/bt_identity_test.c
@@ -20,6 +21,10 @@ on:
       - tools/make_media_probe_hooks.py
       - tests/media_inventory_test.py
       - tests/run-media-tests.sh
+      - tests/camera_cci_test.c
+      - tests/bt_uart_gpi_test.c
+      - tests/bt_uart_service_test.c
+      - tests/run-camera-bluetooth-functional-tests.sh
   pull_request:
     paths:
       - .github/workflows/media-checks.yml
@@ -29,6 +34,7 @@ on:
       - xnu/vermeer/vermeer_media_tlmm.h
       - xnu/vermeer/vermeer_media_probe.h
       - xnu/vermeer/vermeer_media_probe.c
+      - xnu/vermeer/media/**
       - tools/media_inventory.py
       - tests/bt_h4_test.c
       - tests/bt_identity_test.c
@@ -39,6 +45,10 @@ on:
       - tools/make_media_probe_hooks.py
       - tests/media_inventory_test.py
       - tests/run-media-tests.sh
+      - tests/camera_cci_test.c
+      - tests/bt_uart_gpi_test.c
+      - tests/bt_uart_service_test.c
+      - tests/run-camera-bluetooth-functional-tests.sh
 permissions:
   contents: read
 jobs:
@@ -48,3 +58,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sh tests/run-media-tests.sh
+      - run: CC=clang sh tests/run-camera-bluetooth-functional-tests.sh
