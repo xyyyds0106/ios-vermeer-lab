@@ -93,7 +93,9 @@ def trace(lines, run, image_sha256):
                 if prev != 3 or phase != last["phase"] or (r["result"] == 0 and phase != 5):
                     raise ValueError("premature completion")
             elif state == 6:
-                if prev not in (1, 3) or phase not in (last["phase"], last["phase"] + 1):
+                pending_ack = prev == 2 and phase == last["phase"] and r["result"] == 3
+                between_reads = prev in (1, 3) and phase in (last["phase"], last["phase"] + 1)
+                if not (pending_ack or between_reads):
                     raise ValueError("refusal order")
             else:
                 raise ValueError("duplicate begin")

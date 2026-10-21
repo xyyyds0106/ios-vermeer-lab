@@ -104,6 +104,114 @@ constraints, six Python trace suites, C-to-Python interoperability and a
 freestanding AArch64 include check. Test records are synthetic, not phone data.
 No linked kernel producer or new boot image is delivered by this change.
 
+## Dry-run producer and durable acknowledgement candidate
+
+`vermeer_baseband_observer.h` now implements a single-owner worker state machine,
+not just a codec. It deliberately has **no reader callback**, physical-pointer
+dereference, reset call or hardware-start entry. Its five simulated steps use
+fixed fixture addresses/lengths and do not inspect memory at those addresses.
+The existing USB implementation and `tools/capture-debug.ps1` are unchanged.
+This candidate is separate from the coordinator's exact42ce3a7 kernel candidate;
+it has not been linked, pushed or device-tested.
+
+Synthetic records use CRC-protected binary magic `VBDR`, version1, and text
+prefix `VBDR1 `. The remaining fields reuse the128-byte record layout above.
+The real-record decoder rejects that binary magic and ignores that text prefix.
+The dry receiver reports `synthetic_pass` separately and always sets
+`metadata_pass=false` and `modem_operation_proven=false`. A transport rehearsal
+cannot be mistaken for SMEM access, even when it finishes successfully.
+
+| Interface | Caller contract |
+| --- | --- |
+| `vbb_observer_start(context, run, image, now_ms, timeout_ms)` | Once on a zeroed context, verified nonzero identities, monotonic time; timeout1..60000ms |
+| `vbb_observer_poll(context, now_ms, publish, arg)` | Worker only; bounded polling while waiting, independent of incoming ACKs |
+| `publish(arg, line, length)` | Copy all264 bytes under the shared ring lock, or copy none; return1/0, negative for fatal failure; no printf or reentry |
+| `vbb_observer_ack_line(context, line, length, now_ms)` | Worker dequeues a bounded61-byte ACK copied from USB; no concurrent context mutation |
+| `vbb_observer_disconnect(context)` | Permanently stops the context; no automatic retry/reuse |
+
+The full emitted packet is a leading newline plus a263-byte record line,
+264 bytes total. The leading newline separates a preceding unfinished console
+fragment. Code review of retained GUI011 `serial_console.c` confirms a256-byte
+per-CPU buffer, a16-byte flush buffer and `_cnputs` calls for each flush chunk.
+The ARM `pe_kprintf` mirror also appends individual characters. A single printf
+call therefore does not provide record-level publication. The candidate avoids
+that path entirely. `vbb_observer_publish_atomic` uses try-lock, one infallible
+append-while-locked, and unlock. The integration owner must bind those callbacks
+inside `vermeer_debug.c` to the **same** lock/ring used by existing writers;
+calling the current void/best-effort `vermeer_debug_append` does not satisfy the
+success-return contract. Lock contention copies nothing and retries within the
+original deadline. Ring overwrite can still lose records, so ACK remains required.
+
+Each published BEGIN, BEFORE_READ, READ_OK and terminal record waits for
+`ba TOKEN32 SEQ16 CRC8`, exactly61 characters before newline, fitting the current
+63-character command limit. Token, sequence and CRC must match the one pending
+frame. Early, duplicate, stale or malformed ACKs cannot advance it. Successful
+BEFORE_READ acknowledgement increments only the synthetic-step counter; there
+is no hardware operation to invoke. FINISHED is DONE only after its ACK.
+The initial run/image handshake and worker registration remain integration work.
+
+The proposed bounded start-handshake commands are below; they are **not yet
+recognized by the current USB parser**. USB copies commands to the sole worker,
+which owns a staging object separate from the active observer:
+
+| Proposed command | Length without newline | Staging action |
+| --- | --- | --- |
+| `bb TOKEN32` | 35 | Start a new nonzero128-bit token, clear32 hash bytes/4-bit mask, set fixed2s deadline |
+| `bh0 TOKEN32 HASH16` through `bh3 TOKEN32 HASH16` | 53 | Supply exactly8 bytes of the SHA256 at offsets0/8/16/24; token must match |
+| `bg TOKEN32` | 35 | Commit only if token matches, all4 chunks exist, digest is nonzero and deadline has not expired; call `vbb_observer_start` once |
+| `ba TOKEN32 SEQ16 CRC8` | 61 | Existing candidate ACK parser, worker only; no staging changes |
+
+Require lowercase hex of exact width, exact spaces and no trailing text. Every
+hash fragment carries the entire run token, avoiding short-ticket ambiguity.
+Reject duplicate/conflicting chunks; malformed staging commands, expiry or
+disconnect erase the staging object without publishing BEGIN or starting work.
+No fragment extends the original deadline. Reject a new `bb` while staging or
+an observer is active; after a terminal observer state require an explicit owner
+lifecycle decision, never silently zero/restart the context. Only a successful
+complete commit permits BEGIN. Its ordinary durable ACK gates all further
+synthetic progress. The owner must test missing/reordered/duplicated chunks,
+cross-run fragments and saturation of the bounded command queue before linking.
+
+An ACK timeout after a published BEFORE_READ emits REFUSED/result3 at exactly
+that phase, without READ_OK or ABORT. The trace validator now accepts this precise
+sequence; it rejects a different phase or refusal code. If BEGIN could never be
+published, it stops with no invented trace. If a simulated step completed but
+READ_OK could not be published, it stops with an incomplete trace rather than
+claiming the step was never performed. Terminal ACK timeout, disconnect, backward
+clock or deadline overflow stops permanently. No later poll resumes the job.
+
+`tools/baseband_observer.py` is a host library with no serial/ADB/Fastboot imports.
+The integration owner passes received byte fragments to `DryReceiver.feed` and
+sends only returned ACK bytes. It handles every split/one-byte delivery, bounded
+lines, CRC, identities and ordered transitions. For each accepted frame it
+performs a complete journal write, flush and `os.fsync` **before returning ACK**.
+Short write, write/flush/fsync error or malformed record permanently poisons the
+receiver and returns no ACK for that frame. `create_journal` exclusively creates
+a host file and cannot overwrite an earlier run; POSIX also fsyncs its directory.
+The owner provisions the Windows directory. ACK trusts successful host storage
+flush semantics; it is not cryptographic proof against a dishonest host or a
+disk that ignores flush requests. Partial journal writes remain failure evidence,
+and are not silently resumed as a new run.
+
+The extended runner passes the original codec suite plus100,000 malformed ACKs,
+publication contention/failure, timeout at the deadline, duplicate/early/wrong
+token/sequence/CRC, clock/disconnect termination and a real-ring test with1000
+records concurrently interleaved with another thread's console fragments.
+All1000 records remain whole across ring wrap and1..127-byte extraction.
+Ten Python suites include all265 split positions of the264-byte packet, one-byte
+reassembly, interleaving/corruption rejection and durable-I/O failure injection.
+End-to-end tests run the actual C worker as a local child process, feed its output
+bytewise into the receiver, write/fsync a real temporary host file and return
+the generated ACK through the child's stdin. Success ends with5 synthetic steps;
+persisted-but-lost ACK, wrong ACK, disk-flush failure and disconnect end with0
+steps. Both portable headers pass freestanding AArch64 syntax checks.
+
+Before actual SMEM reads, the integration owner still must complete the bounded
+start handshake, single-owner worker queue, atomic ring adapter, capture ACK
+plumbing, and device-side dry-run validation. Exception isolation and the verified
+reset-to-Fastboot path remain separate prerequisites. Do not add a reader callback
+to bypass those prerequisites or include this code in an already-frozen image.
+
 ## Reset and cross-reset RAM evidence
 
 Saved handset FDT (`device-audit/baseband-observability-audit.json`, private)
